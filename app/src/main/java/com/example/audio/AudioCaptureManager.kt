@@ -48,6 +48,7 @@ class AudioCaptureManager(
   private val onStatusChanged: (AudioCaptureStatus) -> Unit = {},
 ) {
   private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+  private val mainHandler = Handler(Looper.getMainLooper())
   private val isRunning = AtomicBoolean(false)
   private val isPaused = AtomicBoolean(false)
 
@@ -296,7 +297,7 @@ class AudioCaptureManager(
         }
       }
     deviceCallback = callback
-    audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+    audioManager.registerAudioDeviceCallback(callback, mainHandler)
   }
 
   private fun unregisterMicDeviceCallback() {

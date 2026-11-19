@@ -79,7 +79,7 @@ object PlatformCompat {
 
   @SuppressLint("WrongConstant")
   fun createOverlayVisualContext(context: Context): Context {
-    if (context.isUiContextCompat()) {
+    if (context.isUiContext) {
       return context
     }
     return runCatching {
@@ -99,12 +99,16 @@ object PlatformCompat {
   }
 
   /**
-   * Queries maximum display bounds using a visual WindowContext on Android 16/17+.
+   * Queries maximum display bounds and density using a visual WindowContext on Android 16/17+.
    */
   fun queryMaximumDisplayMetrics(context: Context): Triple<Int, Int, Int> {
-    val windowManager = resolveOverlayWindowManager(context)
+    val visualContext = createOverlayVisualContext(context)
+    val windowManager = visualContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     val bounds = windowManager.maximumWindowMetrics.bounds
-    val dpi = context.resources.displayMetrics.densityDpi.coerceAtLeast(DisplayMetrics.DENSITY_MEDIUM)
+    val configDpi = visualContext.resources.configuration.densityDpi
+    val dpi =
+      (if (configDpi > 0) configDpi else visualContext.resources.displayMetrics.densityDpi)
+        .coerceAtLeast(DisplayMetrics.DENSITY_MEDIUM)
     return Triple(bounds.width().coerceAtLeast(128), bounds.height().coerceAtLeast(128), dpi)
   }
 
@@ -156,9 +160,5 @@ object PlatformCompat {
    */
   fun shouldReleaseIdleCachesOnTrim(level: Int): Boolean {
     return level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
-  }
-
-  private fun Context.isUiContextCompat(): Boolean {
-    return runCatching { isUiContext }.getOrDefault(false)
   }
 }

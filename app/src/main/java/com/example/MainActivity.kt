@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
     val intent =
       Intent(
         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-        Uri.parse("package:$packageName"),
+        Uri.fromParts("package", packageName, null),
       )
     runCatching { startActivity(intent) }
   }

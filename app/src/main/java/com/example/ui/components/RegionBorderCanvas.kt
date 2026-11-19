@@ -8,7 +8,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.State
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -20,9 +21,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.LocalStudioColors
 
+private const val DASH_PHASE_STEPS = 24
+
 /**
  * Lightweight GPU-friendly deep red animated dashed border. When [showBorder] or [animate] is
  * false, no infinite transition is created or ticked, keeping GPU and battery overhead at zero.
+ * Pre-allocates quantized [Stroke]/[PathEffect] steps and defers animation state reads to the
+ * Draw phase so Composition/Layout are skipped on animation ticks.
  */
 @Composable
 fun RegionBorderOverlayCanvas(
@@ -44,23 +49,38 @@ fun RegionBorderOverlayCanvas(
   val strokePx = with(density) { strokeWidth.toPx() }
   val neutralStrokePx = with(density) { 1.5.dp.toPx() }
 
-  val phase =
+  val shadowColor = remember { Color.Black.copy(alpha = 0.35f) }
+  val shadowStroke = remember(strokePx) { Stroke(width = strokePx + 1.5f) }
+  val neutralStroke = remember(neutralStrokePx) { Stroke(width = neutralStrokePx) }
+  val animatedStrokes =
+    remember(showBorder, dashPx, gapPx, strokePx) {
+      if (!showBorder) {
+        emptyArray()
+      } else {
+        val intervals = floatArrayOf(dashPx, gapPx)
+        val period = dashPx + gapPx
+        Array(DASH_PHASE_STEPS) { step ->
+          val stepPhase = -(step.toFloat() / DASH_PHASE_STEPS) * period
+          Stroke(width = strokePx, pathEffect = PathEffect.dashPathEffect(intervals, stepPhase))
+        }
+      }
+    }
+
+  val stepState: State<Float>? =
     if (showBorder && animate) {
       val transition = rememberInfiniteTransition(label = "region_border_phase")
-      val animatedPhase by
-        transition.animateFloat(
-          initialValue = 0f,
-          targetValue = -(dashPx + gapPx),
-          animationSpec =
-            infiniteRepeatable(
-              animation = tween(durationMillis = 650, easing = LinearEasing),
-              repeatMode = RepeatMode.Restart,
-            ),
-          label = "dash_phase",
-        )
-      animatedPhase
+      transition.animateFloat(
+        initialValue = 0f,
+        targetValue = DASH_PHASE_STEPS.toFloat(),
+        animationSpec =
+          infiniteRepeatable(
+            animation = tween(durationMillis = 650, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+          ),
+        label = "dash_phase_step",
+      )
     } else {
-      0f
+      null
     }
 
   Canvas(modifier = modifier) {
@@ -92,26 +112,26 @@ fun RegionBorderOverlayCanvas(
     val rectTopLeft = Offset(l, t)
     val rectSize = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f))
 
-    if (showBorder) {
-      val effect = PathEffect.dashPathEffect(floatArrayOf(dashPx, gapPx), phase)
+    if (showBorder && animatedStrokes.isNotEmpty()) {
+      val stepIndex = (stepState?.value?.toInt() ?: 0).mod(DASH_PHASE_STEPS)
       drawRect(
-        color = Color.Black.copy(alpha = 0.35f),
+        color = shadowColor,
         topLeft = rectTopLeft,
         size = rectSize,
-        style = Stroke(width = strokePx + 1.5f),
+        style = shadowStroke,
       )
       drawRect(
         color = studioColors.recordAccent,
         topLeft = rectTopLeft,
         size = rectSize,
-        style = Stroke(width = strokePx, pathEffect = effect),
+        style = animatedStrokes[stepIndex],
       )
     } else if (neutralGuideColor != Color.Transparent) {
       drawRect(
         color = neutralGuideColor,
         topLeft = rectTopLeft,
         size = rectSize,
-        style = Stroke(width = neutralStrokePx),
+        style = neutralStroke,
       )
     }
   }

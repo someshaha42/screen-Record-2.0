@@ -52,6 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -555,18 +556,26 @@ class RecordingService : Service() {
       serviceScope.launch {
         var lastEmittedSecond = -1L
         while (isActive) {
-          val phase = RecordingSessionStore.state.value.phase
-          if (phase == RecordingPhase.RECORDING) {
-            val elapsed =
-              (SystemClock.elapsedRealtime() - recordingStartElapsedMs - pausedAccumulatedMs)
-                .coerceAtLeast(0L)
-            val currentSecond = elapsed / 1000L
-            if (currentSecond != lastEmittedSecond) {
-              lastEmittedSecond = currentSecond
-              RecordingSessionStore.update { it.copy(elapsedMillis = elapsed) }
+          when (RecordingSessionStore.state.value.phase) {
+            RecordingPhase.RECORDING -> {
+              val elapsed =
+                (SystemClock.elapsedRealtime() - recordingStartElapsedMs - pausedAccumulatedMs)
+                  .coerceAtLeast(0L)
+              val currentSecond = elapsed / 1000L
+              if (currentSecond != lastEmittedSecond) {
+                lastEmittedSecond = currentSecond
+                RecordingSessionStore.update { it.copy(elapsedMillis = elapsed) }
+              }
+              val nextTickDelayMs = (1000L - (elapsed % 1000L)).coerceIn(50L, 1000L)
+              delay(nextTickDelayMs)
             }
+            RecordingPhase.PAUSED -> {
+              // Suspend with zero CPU wakeups until recording resumes or stops
+              RecordingSessionStore.state.first { it.phase != RecordingPhase.PAUSED }
+            }
+            RecordingPhase.IDLE,
+            RecordingPhase.FINALIZING -> break
           }
-          delay(250L)
         }
       }
   }

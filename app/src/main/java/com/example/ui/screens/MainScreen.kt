@@ -77,6 +77,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,6 +90,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -625,42 +627,37 @@ private fun RecordingConsoleCard(
       label = "status_container",
     )
 
-  // Pulse dot ONLY while actively recording to conserve GPU/battery when idle
-  val dotAlpha =
+  // Pulse dot ONLY while actively recording and defer alpha read to graphicsLayer draw phase
+  val dotAlphaState: State<Float>? =
     if (phase == RecordingPhase.RECORDING) {
       val transition = rememberInfiniteTransition(label = "rec_dot_pulse")
-      val alpha by
-        transition.animateFloat(
-          initialValue = 1f,
-          targetValue = 0.25f,
-          animationSpec =
-            infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse),
-          label = "dot_alpha",
-        )
-      alpha
+      transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec =
+          infiniteRepeatable(animation = tween(700), repeatMode = RepeatMode.Reverse),
+        label = "dot_alpha",
+      )
     } else {
-      1f
+      null
+    }
+
+  val surfaceColor = MaterialTheme.colorScheme.surface
+  val headerGradient =
+    remember(statusContainer, surfaceColor) {
+      Brush.verticalGradient(
+        colors = listOf(statusContainer.copy(alpha = 0.36f), surfaceColor),
+      )
     }
 
   Card(
     modifier = Modifier.fillMaxWidth(),
     shape = RoundedCornerShape(24.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    colors = CardDefaults.cardColors(containerColor = surfaceColor),
     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
   ) {
     Column(
-      modifier =
-        Modifier.fillMaxWidth()
-          .background(
-            Brush.verticalGradient(
-              colors =
-                listOf(
-                  statusContainer.copy(alpha = 0.36f),
-                  MaterialTheme.colorScheme.surface,
-                ),
-            ),
-          )
-          .padding(20.dp),
+      modifier = Modifier.fillMaxWidth().background(headerGradient).padding(20.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -677,7 +674,10 @@ private fun RecordingConsoleCard(
         ) {
           Box(
             modifier =
-              Modifier.size(8.dp).alpha(dotAlpha).clip(CircleShape).background(statusColor),
+              Modifier.size(8.dp)
+                .graphicsLayer { alpha = dotAlphaState?.value ?: 1f }
+                .clip(CircleShape)
+                .background(statusColor),
           )
           Text(
             text = statusLabel,

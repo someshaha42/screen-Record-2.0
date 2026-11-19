@@ -12,8 +12,8 @@ import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
 import java.nio.ByteBuffer
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 data class MuxerOutput(val uri: Uri, val displayName: String, val filePath: String? = null)
@@ -43,10 +43,12 @@ class MediaMuxerManager(
   private var lastVideoPtsUs = -1L
   private var lastAudioPtsUs = -1L
   private var isReleased = false
+  private val reusableVideoInfo = MediaCodec.BufferInfo()
+  private val reusableAudioInfo = MediaCodec.BufferInfo()
 
   fun prepare(): MuxerOutput {
     synchronized(lock) {
-      val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+      val timestamp = FILENAME_FORMATTER.format(LocalDateTime.now())
       displayName = "FrameCut_$timestamp.mp4"
 
       val resolver: ContentResolver = context.contentResolver
@@ -160,13 +162,11 @@ class MediaMuxerManager(
         )
       lastVideoPtsUs = normalizedPtsUs
 
-      val adjustedInfo = MediaCodec.BufferInfo().apply {
-        set(info.offset, info.size, normalizedPtsUs, info.flags)
-      }
-      buffer.position(adjustedInfo.offset)
-      buffer.limit(adjustedInfo.offset + adjustedInfo.size)
+      reusableVideoInfo.set(info.offset, info.size, normalizedPtsUs, info.flags)
+      buffer.position(reusableVideoInfo.offset)
+      buffer.limit(reusableVideoInfo.offset + reusableVideoInfo.size)
       runCatching {
-          mediaMuxer?.writeSampleData(videoTrackIndex, buffer, adjustedInfo)
+          mediaMuxer?.writeSampleData(videoTrackIndex, buffer, reusableVideoInfo)
           videoFramesWritten++
         }
         .onFailure { Log.e(TAG, "writeVideoSample failed", it) }
@@ -190,12 +190,10 @@ class MediaMuxerManager(
         )
       lastAudioPtsUs = normalizedPtsUs
 
-      val adjustedInfo = MediaCodec.BufferInfo().apply {
-        set(info.offset, info.size, normalizedPtsUs, info.flags)
-      }
-      buffer.position(adjustedInfo.offset)
-      buffer.limit(adjustedInfo.offset + adjustedInfo.size)
-      runCatching { mediaMuxer?.writeSampleData(audioTrackIndex, buffer, adjustedInfo) }
+      reusableAudioInfo.set(info.offset, info.size, normalizedPtsUs, info.flags)
+      buffer.position(reusableAudioInfo.offset)
+      buffer.limit(reusableAudioInfo.offset + reusableAudioInfo.size)
+      runCatching { mediaMuxer?.writeSampleData(audioTrackIndex, buffer, reusableAudioInfo) }
         .onFailure { Log.e(TAG, "writeAudioSample failed", it) }
     }
   }
@@ -242,6 +240,8 @@ class MediaMuxerManager(
 
   companion object {
     private const val TAG = "MediaMuxerManager"
+    private val FILENAME_FORMATTER: DateTimeFormatter =
+      DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss", Locale.US)
 
     fun normalizePresentationTimeUs(
       rawPtsUs: Long,

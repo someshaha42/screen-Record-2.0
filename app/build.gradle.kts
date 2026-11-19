@@ -10,12 +10,13 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk { version = release(37) }
+  buildToolsVersion = "37.0.0"
 
   defaultConfig {
     applicationId = "com.aistudio.framecut.rkzqmp"
     minSdk = 36
-    targetSdk = 36
+    targetSdk = 37
     versionCode = 1
     versionName = "1.0"
 
@@ -44,6 +45,7 @@ android {
     release {
       isCrunchPngs = false
       isMinifyEnabled = false
+      ndk { abiFilters += "arm64-v8a" }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.

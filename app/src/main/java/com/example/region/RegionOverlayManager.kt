@@ -129,7 +129,15 @@ internal class RegionBorderOverlayView(
   private val gapLength = 9f * density
   private val dashPeriod = dashLength + gapLength
 
-  private var phase = 0f
+  private val dashIntervals = floatArrayOf(dashLength, gapLength)
+  private val phaseSteps = 24
+  private val dashEffects =
+    Array(phaseSteps) { step ->
+      val stepPhase = -(step.toFloat() / phaseSteps) * dashPeriod
+      DashPathEffect(dashIntervals, stepPhase)
+    }
+
+  private var phaseIndex = 0
   private var paused = false
 
   private val borderPaint =
@@ -137,6 +145,7 @@ internal class RegionBorderOverlayView(
       style = Paint.Style.STROKE
       strokeWidth = strokePx
       color = Color.rgb(220, 38, 38) // Deep studio crimson
+      pathEffect = dashEffects[0]
     }
 
   private val backingPaint =
@@ -159,6 +168,17 @@ internal class RegionBorderOverlayView(
       isFakeBoldText = true
     }
 
+  private val badgePadHorizontal = 14f * density
+  private val recBadgeWidth = textPaint.measureText(LABEL_RECORDING) + badgePadHorizontal
+  private val pausedBadgeWidth = textPaint.measureText(LABEL_PAUSED) + badgePadHorizontal
+  private val labelHeight = 18f * density
+  private val badgeGap = 4f * density
+  private val badgeCornerRadius = 5f * density
+  private val badgeTextInsetX = 7f * density
+  private val badgeTextInsetBottom = 5f * density
+  private val edgeMargin = 4f * density
+  private val halfOuterStroke = (strokePx + backingExtraPx) / 2f
+
   private val windowLocation = IntArray(2)
   private val drawRect = RectF()
   private val badgeRect = RectF()
@@ -167,14 +187,18 @@ internal class RegionBorderOverlayView(
   fun startAnimation() {
     if (animator != null) return
     animator =
-      ValueAnimator.ofFloat(0f, dashPeriod).apply {
+      ValueAnimator.ofInt(0, phaseSteps).apply {
         duration = 700L
         repeatCount = ValueAnimator.INFINITE
         repeatMode = ValueAnimator.RESTART
         interpolator = LinearInterpolator()
         addUpdateListener { anim ->
-          phase = -(anim.animatedValue as Float)
-          invalidate()
+          val nextIndex = (anim.animatedValue as Int) % phaseSteps
+          if (nextIndex != phaseIndex) {
+            phaseIndex = nextIndex
+            borderPaint.pathEffect = dashEffects[nextIndex]
+            invalidate()
+          }
         }
         start()
       }
@@ -195,6 +219,7 @@ internal class RegionBorderOverlayView(
   }
 
   fun stopAnimation() {
+    animator?.removeAllUpdateListeners()
     animator?.cancel()
     animator = null
   }
@@ -212,7 +237,7 @@ internal class RegionBorderOverlayView(
     val localBottom = region.bottom - offsetY
 
     // Offset stroke strictly outside the crop rectangle + safety gap so zero pixels bleed into video
-    val outwardOffset = safetyGapPx + (strokePx + backingExtraPx) / 2f
+    val outwardOffset = safetyGapPx + halfOuterStroke
     drawRect.set(
       localLeft - outwardOffset,
       localTop - outwardOffset,
@@ -230,39 +255,43 @@ internal class RegionBorderOverlayView(
       canvas.clipOutRect(clipL, clipT, clipR, clipB)
 
       canvas.drawRect(drawRect, backingPaint)
-      borderPaint.pathEffect = DashPathEffect(floatArrayOf(dashLength, gapLength), phase)
       canvas.drawRect(drawRect, borderPaint)
 
-      val label = if (paused) "PAUSED" else "REC REGION"
-      val labelW = textPaint.measureText(label) + 14f * density
-      val labelH = 18f * density
-      val badgeGap = 4f * density
-      val outerStrokeEdgeTop = drawRect.top - (strokePx + backingExtraPx) / 2f
-      val outerStrokeEdgeBottom = drawRect.bottom + (strokePx + backingExtraPx) / 2f
+      val label = if (paused) LABEL_PAUSED else LABEL_RECORDING
+      val labelW = if (paused) pausedBadgeWidth else recBadgeWidth
+      val outerStrokeEdgeTop = drawRect.top - halfOuterStroke
+      val outerStrokeEdgeBottom = drawRect.bottom + halfOuterStroke
 
       // Draw badge only where it fits cleanly outside the crop rectangle
       val badgeTop =
         when {
-          outerStrokeEdgeTop - labelH - badgeGap >= 0f -> outerStrokeEdgeTop - labelH - badgeGap
-          outerStrokeEdgeBottom + labelH + badgeGap <= height -> outerStrokeEdgeBottom + badgeGap
+          outerStrokeEdgeTop - labelHeight - badgeGap >= 0f ->
+            outerStrokeEdgeTop - labelHeight - badgeGap
+          outerStrokeEdgeBottom + labelHeight + badgeGap <= height ->
+            outerStrokeEdgeBottom + badgeGap
           else -> null
         }
 
       if (badgeTop != null) {
         val badgeLeft =
-          drawRect.left.coerceIn(4f * density, (width - labelW - 4f * density).coerceAtLeast(4f * density))
-        badgeRect.set(badgeLeft, badgeTop, badgeLeft + labelW, badgeTop + labelH)
-        canvas.drawRoundRect(badgeRect, 5f * density, 5f * density, badgePaint)
+          drawRect.left.coerceIn(edgeMargin, (width - labelW - edgeMargin).coerceAtLeast(edgeMargin))
+        badgeRect.set(badgeLeft, badgeTop, badgeLeft + labelW, badgeTop + labelHeight)
+        canvas.drawRoundRect(badgeRect, badgeCornerRadius, badgeCornerRadius, badgePaint)
         canvas.drawText(
           label,
-          badgeRect.left + 7f * density,
-          badgeRect.bottom - 5f * density,
+          badgeRect.left + badgeTextInsetX,
+          badgeRect.bottom - badgeTextInsetBottom,
           textPaint,
         )
       }
     } finally {
       canvas.restoreToCount(saveCount)
     }
+  }
+
+  private companion object {
+    const val LABEL_RECORDING = "REC REGION"
+    const val LABEL_PAUSED = "PAUSED"
   }
 
   override fun onDetachedFromWindow() {

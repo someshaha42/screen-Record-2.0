@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -78,9 +79,13 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.R
 import com.example.recordings.RecordedVideoItem
 import com.example.ui.theme.LocalStudioColors
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+private val RECORDING_DATE_FORMATTER: DateTimeFormatter =
+  DateTimeFormatter.ofPattern("MMM d, HH:mm", Locale.US)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +152,7 @@ fun RecordingsScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            items(recordings, key = { it.id.toString() + it.displayName }) { item ->
+            items(recordings, key = { it.id }) { item ->
               RecordingItemCard(
                 item = item,
                 onPlay = { playingItem = item },
@@ -163,7 +168,7 @@ fun RecordingsScreen(
             contentPadding = PaddingValues(gridPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
-            items(recordings, key = { it.id.toString() + it.displayName }) { item ->
+            items(recordings, key = { it.id }) { item ->
               RecordingItemCard(
                 item = item,
                 onPlay = { playingItem = item },
@@ -264,12 +269,22 @@ private fun RecordingItemCard(
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        val details = buildList {
-          if (item.width > 0 && item.height > 0) add("${item.width}×${item.height}")
-          if (item.durationMs > 0) add(formatDuration(item.durationMs))
-          add(formatFileSize(item.sizeBytes))
-          if (item.dateAddedSec > 0) add(formatDate(item.dateAddedSec))
-        }.joinToString(" • ")
+        val details =
+          remember(
+            item.width,
+            item.height,
+            item.durationMs,
+            item.sizeBytes,
+            item.dateAddedSec,
+          ) {
+            buildList {
+                if (item.width > 0 && item.height > 0) add("${item.width}×${item.height}")
+                if (item.durationMs > 0) add(formatDuration(item.durationMs))
+                add(formatFileSize(item.sizeBytes))
+                if (item.dateAddedSec > 0) add(formatDate(item.dateAddedSec))
+              }
+              .joinToString(" • ")
+          }
 
         Text(
           text = details,
@@ -443,9 +458,10 @@ private fun shareVideo(context: Context, item: RecordedVideoItem) {
     Intent(Intent.ACTION_SEND).apply {
       type = "video/mp4"
       putExtra(Intent.EXTRA_STREAM, item.uri)
+      clipData = ClipData.newRawUri(item.displayName, item.uri)
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-  context.startActivity(Intent.createChooser(shareIntent, item.displayName))
+  runCatching { context.startActivity(Intent.createChooser(shareIntent, item.displayName)) }
 }
 
 private fun formatDuration(ms: Long): String {
@@ -466,6 +482,6 @@ private fun formatFileSize(bytes: Long): String {
 }
 
 private fun formatDate(epochSec: Long): String {
-  val sdf = SimpleDateFormat("MMM d, HH:mm", Locale.US)
-  return sdf.format(Date(epochSec * 1000L))
+  val zoned = Instant.ofEpochSecond(epochSec).atZone(ZoneId.systemDefault())
+  return RECORDING_DATE_FORMATTER.format(zoned)
 }
