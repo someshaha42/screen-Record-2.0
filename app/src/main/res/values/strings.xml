@@ -1,0 +1,80 @@
+<resources>
+    <string name="app_name">FrameCut</string>
+    <string name="notification_channel_name">Screen Recording</string>
+    <string name="notification_channel_description">Active screen recording controls and status</string>
+    <string name="notification_title_recording">Recording Screen</string>
+    <string name="notification_title_paused">Recording Paused</string>
+    <string name="notification_text_fullscreen">Full screen capture in progress</string>
+    <string name="notification_text_region">Region capture in progress</string>
+    <string name="notification_action_pause">Pause</string>
+    <string name="notification_action_resume">Resume</string>
+    <string name="notification_action_stop">Stop</string>
+
+    <string name="status_ready">Ready to record</string>
+    <string name="status_recording">Recording</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_saving">Finalizing MP4…</string>
+    <string name="status_error">Recording error</string>
+
+    <string name="action_record">Record</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_recordings">Recordings</string>
+    <string name="action_adjust_region">Adjust Region</string>
+    <string name="action_confirm_region">Confirm Region</string>
+    <string name="action_reset_region">Reset</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_share">Share</string>
+    <string name="action_play">Play</string>
+
+    <string name="section_recording_mode">Recording Mode</string>
+    <string name="section_audio_source">Audio Source</string>
+    <string name="section_video_bitrate">Video Bitrate</string>
+    <string name="section_region_animation">Region Border Animation</string>
+    <string name="section_region_preview">Selected Region</string>
+    <string name="section_orientation_mode">Orientation</string>
+    <string name="orientation_portrait">Portrait</string>
+    <string name="orientation_portrait_desc">Vertical for Full Screen &amp; Region</string>
+    <string name="orientation_landscape">Landscape</string>
+    <string name="orientation_landscape_desc">Horizontal for Full Screen &amp; Region</string>
+
+    <string name="mode_fullscreen">Full Screen</string>
+    <string name="mode_fullscreen_desc">Entire display capture</string>
+    <string name="mode_region">Region / Area</string>
+    <string name="mode_region_desc">GPU-cropped screen rectangle</string>
+
+    <string name="audio_internal">Internal Audio</string>
+    <string name="audio_internal_desc">Device media &amp; app playback</string>
+    <string name="audio_microphone">Microphone</string>
+    <string name="audio_microphone_desc">External mic prioritized automatically</string>
+
+    <string name="bitrate_100">100 Mbps</string>
+    <string name="bitrate_150">150 Mbps</string>
+    <string name="bitrate_200">200 Mbps</string>
+    <string name="bitrate_250">250 Mbps</string>
+    <string name="bitrate_300">300 Mbps</string>
+    <string name="bitrate_350">350 Mbps</string>
+
+    <string name="anim_show">Show</string>
+    <string name="anim_hide">Hide</string>
+
+    <string name="overlay_optional_title">Floating border over other apps</string>
+    <string name="overlay_optional_granted">Active during region recording</string>
+    <string name="overlay_optional_denied">Optional: region still records cleanly without it</string>
+    <string name="overlay_optional_enable">Enable (Optional)</string>
+
+    <string name="recordings_title">Recorded Videos</string>
+    <string name="recordings_empty_title">No recordings yet</string>
+    <string name="recordings_empty_subtitle">Captured MP4 videos will appear here ready to play or share.</string>
+
+    <string name="cd_record_button">Start screen recording</string>
+    <string name="cd_stop_button">Stop screen recording</string>
+    <string name="cd_pause_button">Pause screen recording</string>
+    <string name="cd_resume_button">Resume screen recording</string>
+    <string name="cd_recordings_button">Open recorded videos</string>
+    <string name="cd_back_button">Navigate back</string>
+    <string name="cd_region_preview">Selected screen recording region preview</string>
+</resources>

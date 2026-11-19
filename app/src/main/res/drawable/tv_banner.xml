@@ -1,0 +1,50 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Dark studio slate backdrop matching app icon background -->
+    <path
+        android:fillColor="#111318"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <!-- Subtle top-right crimson studio glow band -->
+    <path
+        android:fillColor="#1FF43F5E"
+        android:pathData="M180,0 L320,0 L320,180 L110,180 Z" />
+
+    <!-- Studio camera / frame cutout emblem centered left -->
+    <path
+        android:fillColor="#1E2430"
+        android:pathData="M56,42h96a16,16 0 0,1 16,16v64a16,16 0 0,1 -16,16h-96a16,16 0 0,1 -16,-16v-64a16,16 0 0,1 16,-16z" />
+
+    <!-- Recording frame corner brackets inside emblem -->
+    <path
+        android:strokeColor="#F43F5E"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M56,74 L56,58 L72,58 M136,58 L152,58 L152,74 M56,106 L56,122 L72,122 M136,122 L152,122 L152,106" />
+
+    <!-- Active record lens dot -->
+    <path
+        android:fillColor="#F43F5E"
+        android:pathData="M104,70 A20,20 0 1,1 103.99,70 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.25"
+        android:pathData="M98,79 A5,5 0 1,1 97.99,79 Z" />
+
+    <!-- Minimal geometric wordmark bars ("FRAMECUT") on right side -->
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M192,66h72a4,4 0 0,1 0,8h-72a4,4 0 0,1 0,-8z" />
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M192,88h52a3,3 0 0,1 0,6h-52a3,3 0 0,1 0,-6z" />
+    <path
+        android:fillColor="#F43F5E"
+        android:pathData="M192,108h36a3,3 0 0,1 0,6h-36a3,3 0 0,1 0,-6z" />
+</vector>
