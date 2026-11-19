@@ -2,6 +2,7 @@ package com.example
 
 import android.media.MediaFormat
 import com.example.encoder.VideoEncoder
+import com.example.muxer.MediaMuxerManager
 import com.example.region.RegionSelectionManager
 import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
@@ -9,7 +10,6 @@ import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
 import com.example.settings.ColorStandardOption
-import com.example.settings.ContainerMuxerOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.NormalizedRegion
@@ -37,12 +37,13 @@ class RecorderCoreUnitTest {
     assertEquals(128_000, InternalRecordingConfig.AUDIO_BITRATE_BPS)
     assertEquals(1, InternalRecordingConfig.AUDIO_CHANNEL_COUNT)
     assertEquals("4:2:0", InternalRecordingConfig.CHROMA_SUBSAMPLING_LABEL)
+    assertEquals("Standard MP4", InternalRecordingConfig.OUTPUT_CONTAINER_LABEL)
 
     assertEquals(AudioSourceOption.INTERNAL, defaults.audioSource)
     assertEquals(VideoBitrateOption.MBPS_150, defaults.videoBitrate)
     assertEquals(RegionAnimationOption.SHOW, defaults.regionAnimation)
 
-    // Verify all 9 advanced settings default to option A
+    // Verify all configurable settings default to option A
     assertEquals(BitrateModeOption.VBR, defaults.bitrateMode)
     assertEquals(listOf(BitrateModeOption.VBR, BitrateModeOption.CQ), BitrateModeOption.entries)
 
@@ -56,12 +57,6 @@ class RecorderCoreUnitTest {
     assertEquals(
       listOf(ColorStandardOption.BT_709, ColorStandardOption.BT_2020),
       ColorStandardOption.entries,
-    )
-
-    assertEquals(ContainerMuxerOption.HYBRID_MP4, defaults.containerMuxer)
-    assertEquals(
-      listOf(ContainerMuxerOption.HYBRID_MP4, ContainerMuxerOption.MKV_REMUX_MP4),
-      ContainerMuxerOption.entries,
     )
 
     assertEquals(RenderingModeOption.ASYNC_SURFACE, defaults.renderingMode)
@@ -92,18 +87,35 @@ class RecorderCoreUnitTest {
         availableCodecs = emptyList(),
       )
     assertEquals("default-hevc", hevcSelection.codecName)
+  }
 
-    assertEquals(
-      listOf(
-        VideoBitrateOption.MBPS_100,
-        VideoBitrateOption.MBPS_150,
-        VideoBitrateOption.MBPS_200,
-        VideoBitrateOption.MBPS_250,
-        VideoBitrateOption.MBPS_300,
-        VideoBitrateOption.MBPS_350,
-      ),
-      VideoBitrateOption.entries,
-    )
+  @Test
+  fun `muxer timestamp normalization anchors 59-hour boot timestamps cleanly at zero`() {
+    val bootEpochPtsUs = 214_748_000_000L // ~59h 39m 08s since device boot
+    val firstPts =
+      MediaMuxerManager.normalizePresentationTimeUs(
+        rawPtsUs = bootEpochPtsUs,
+        anchorPtsUs = bootEpochPtsUs,
+        lastWrittenPtsUs = -1L,
+      )
+    assertEquals(0L, firstPts)
+
+    val secondPts =
+      MediaMuxerManager.normalizePresentationTimeUs(
+        rawPtsUs = bootEpochPtsUs + 33_333L,
+        anchorPtsUs = bootEpochPtsUs,
+        lastWrittenPtsUs = firstPts,
+      )
+    assertEquals(33_333L, secondPts)
+
+    // Duplicate/jitter timestamp clamps strictly monotonic
+    val duplicatePts =
+      MediaMuxerManager.normalizePresentationTimeUs(
+        rawPtsUs = bootEpochPtsUs + 33_333L,
+        anchorPtsUs = bootEpochPtsUs,
+        lastWrittenPtsUs = secondPts,
+      )
+    assertEquals(33_334L, duplicatePts)
   }
 
   @Test

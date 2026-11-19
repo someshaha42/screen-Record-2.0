@@ -196,7 +196,6 @@ private fun FrameCutApp(
           onSelectColorDepth = remember(viewModel) { viewModel::setColorDepth },
           onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
           onSelectColorStandard = remember(viewModel) { viewModel::setColorStandard },
-          onSelectContainerMuxer = remember(viewModel) { viewModel::setContainerMuxer },
           onSelectRenderingMode = remember(viewModel) { viewModel::setRenderingMode },
           onSelectGopInterval = remember(viewModel) { viewModel::setGopInterval },
           onSelectColorRange = remember(viewModel) { viewModel::setColorRange },

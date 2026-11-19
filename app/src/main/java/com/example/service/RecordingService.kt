@@ -36,7 +36,6 @@ import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
 import com.example.settings.ColorStandardOption
-import com.example.settings.ContainerMuxerOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
@@ -243,13 +242,6 @@ class RecordingService : Service() {
           )
         }
         .getOrDefault(ColorStandardOption.BT_709)
-    val containerMuxer =
-      runCatching {
-          ContainerMuxerOption.valueOf(
-            intent.getStringExtra(EXTRA_CONTAINER_MUXER) ?: ContainerMuxerOption.HYBRID_MP4.name,
-          )
-        }
-        .getOrDefault(ContainerMuxerOption.HYBRID_MP4)
     val renderingMode =
       runCatching {
           RenderingModeOption.valueOf(
@@ -307,7 +299,6 @@ class RecordingService : Service() {
         colorDepth = colorDepth,
         videoFps = videoFps,
         colorStandard = colorStandard,
-        containerMuxer = containerMuxer,
         renderingMode = renderingMode,
         gopInterval = gopInterval,
         colorRange = colorRange,
@@ -384,7 +375,6 @@ class RecordingService : Service() {
         MediaMuxerManager(
           context = this,
           expectAudioTrackInitial = expectAudio,
-          containerMuxer = settings.containerMuxer,
         )
       muxer.prepare()
       muxerManager = muxer
@@ -729,7 +719,6 @@ class RecordingService : Service() {
     const val EXTRA_COLOR_DEPTH = "extra_color_depth"
     const val EXTRA_VIDEO_FPS = "extra_video_fps"
     const val EXTRA_COLOR_STANDARD = "extra_color_standard"
-    const val EXTRA_CONTAINER_MUXER = "extra_container_muxer"
     const val EXTRA_RENDERING_MODE = "extra_rendering_mode"
     const val EXTRA_GOP_INTERVAL = "extra_gop_interval"
     const val EXTRA_COLOR_RANGE = "extra_color_range"
@@ -758,7 +747,6 @@ class RecordingService : Service() {
         putExtra(EXTRA_COLOR_DEPTH, settings.colorDepth.name)
         putExtra(EXTRA_VIDEO_FPS, settings.videoFps.name)
         putExtra(EXTRA_COLOR_STANDARD, settings.colorStandard.name)
-        putExtra(EXTRA_CONTAINER_MUXER, settings.containerMuxer.name)
         putExtra(EXTRA_RENDERING_MODE, settings.renderingMode.name)
         putExtra(EXTRA_GOP_INTERVAL, settings.gopInterval.name)
         putExtra(EXTRA_COLOR_RANGE, settings.colorRange.name)

@@ -22,7 +22,6 @@ import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
 import com.example.settings.ColorStandardOption
-import com.example.settings.ContainerMuxerOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
@@ -196,14 +195,6 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setColorStandard(standard) }
   }
 
-  @Volatile private var latestContainerMuxerOverride: ContainerMuxerOption? = null
-
-  fun setContainerMuxer(muxer: ContainerMuxerOption) {
-    if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestContainerMuxerOverride = muxer
-    viewModelScope.launch { settingsRepo.setContainerMuxer(muxer) }
-  }
-
   @Volatile private var latestRenderingModeOverride: RenderingModeOption? = null
 
   fun setRenderingMode(mode: RenderingModeOption) {
@@ -279,7 +270,6 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
         colorDepth = latestColorDepthOverride ?: baseSettings.colorDepth,
         videoFps = latestVideoFpsOverride ?: baseSettings.videoFps,
         colorStandard = latestColorStandardOverride ?: baseSettings.colorStandard,
-        containerMuxer = latestContainerMuxerOverride ?: baseSettings.containerMuxer,
         renderingMode = latestRenderingModeOverride ?: baseSettings.renderingMode,
         gopInterval = latestGopIntervalOverride ?: baseSettings.gopInterval,
         colorRange = latestColorRangeOverride ?: baseSettings.colorRange,

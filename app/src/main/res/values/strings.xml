@@ -91,12 +91,10 @@
     <string name="color_std_bt2020">BT.2020 (HDR)</string>
     <string name="color_std_bt2020_desc">Wide gamut HLG HDR</string>
 
-    <string name="section_container_muxer">Container &amp; Muxer</string>
-    <string name="section_container_muxer_hint">Controls how MP4 tracks are finalized</string>
-    <string name="muxer_hybrid_mp4">Hybrid / Fragmented MP4</string>
-    <string name="muxer_hybrid_mp4_desc">Crash-safe direct MP4</string>
-    <string name="muxer_mkv_remux">MKV to MP4 Remux</string>
-    <string name="muxer_mkv_remux_desc">Temp capture then remux</string>
+    <string name="section_container_muxer">Output Container</string>
+    <string name="section_container_muxer_hint">Active MP4 muxing container format</string>
+    <string name="muxer_standard_mp4">Standard MP4</string>
+    <string name="muxer_standard_mp4_desc">Native Android MediaMuxer</string>
 
     <string name="section_rendering_mode">Rendering Pipeline</string>
     <string name="section_rendering_mode_hint">Selects zero-copy surface callback mode</string>

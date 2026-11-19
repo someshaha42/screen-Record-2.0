@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.Compare
 import androidx.compose.material.icons.filled.Contrast
-import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HdrOn
@@ -73,7 +72,6 @@ import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
 import com.example.settings.ColorStandardOption
-import com.example.settings.ContainerMuxerOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.RecordingSettings
 import com.example.settings.RenderingModeOption
@@ -90,7 +88,6 @@ fun SettingsScreen(
   onSelectColorDepth: (ColorDepthOption) -> Unit,
   onSelectVideoFps: (VideoFpsOption) -> Unit,
   onSelectColorStandard: (ColorStandardOption) -> Unit,
-  onSelectContainerMuxer: (ContainerMuxerOption) -> Unit,
   onSelectRenderingMode: (RenderingModeOption) -> Unit,
   onSelectGopInterval: (GopIntervalOption) -> Unit,
   onSelectColorRange: (ColorRangeOption) -> Unit,
@@ -186,7 +183,7 @@ fun SettingsScreen(
               ) {
                 BitrateModeCard(settings.bitrateMode, isIdle, onSelectBitrateMode)
                 VideoFpsCard(settings.videoFps, isIdle, onSelectVideoFps)
-                ContainerMuxerCard(settings.containerMuxer, isIdle, onSelectContainerMuxer)
+                OutputContainerCard()
                 GopIntervalCard(settings.gopInterval, isIdle, onSelectGopInterval)
                 AudioFormatCard(settings.audioFormat, isIdle, onSelectAudioFormat)
               }
@@ -206,7 +203,7 @@ fun SettingsScreen(
             ColorDepthCard(settings.colorDepth, isIdle, onSelectColorDepth)
             VideoFpsCard(settings.videoFps, isIdle, onSelectVideoFps)
             ColorStandardCard(settings.colorStandard, isIdle, onSelectColorStandard)
-            ContainerMuxerCard(settings.containerMuxer, isIdle, onSelectContainerMuxer)
+            OutputContainerCard()
             RenderingModeCard(settings.renderingMode, isIdle, onSelectRenderingMode)
             GopIntervalCard(settings.gopInterval, isIdle, onSelectGopInterval)
             ColorRangeCard(settings.colorRange, isIdle, onSelectColorRange)
@@ -366,38 +363,22 @@ private fun ColorStandardCard(
 }
 
 @Composable
-private fun ContainerMuxerCard(
-  selected: ContainerMuxerOption,
-  enabled: Boolean,
-  onSelect: (ContainerMuxerOption) -> Unit,
-) {
+private fun OutputContainerCard() {
   PipelineSectionCard(
     title = stringResource(R.string.section_container_muxer),
     hint = stringResource(R.string.section_container_muxer_hint),
     icon = Icons.Default.Storage,
   ) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      PipelineOptionTile(
-        title = stringResource(R.string.muxer_hybrid_mp4),
-        subtitle = stringResource(R.string.muxer_hybrid_mp4_desc),
-        icon = Icons.Default.Movie,
-        selected = selected == ContainerMuxerOption.HYBRID_MP4,
-        enabled = enabled,
-        testTag = "muxer_hybrid_mp4",
-        onClick = { onSelect(ContainerMuxerOption.HYBRID_MP4) },
-        modifier = Modifier.weight(1f),
-      )
-      PipelineOptionTile(
-        title = stringResource(R.string.muxer_mkv_remux),
-        subtitle = stringResource(R.string.muxer_mkv_remux_desc),
-        icon = Icons.Default.FolderZip,
-        selected = selected == ContainerMuxerOption.MKV_REMUX_MP4,
-        enabled = enabled,
-        testTag = "muxer_mkv_remux",
-        onClick = { onSelect(ContainerMuxerOption.MKV_REMUX_MP4) },
-        modifier = Modifier.weight(1f),
-      )
-    }
+    PipelineOptionTile(
+      title = stringResource(R.string.muxer_standard_mp4),
+      subtitle = stringResource(R.string.muxer_standard_mp4_desc),
+      icon = Icons.Default.Movie,
+      selected = true,
+      enabled = true,
+      testTag = "muxer_standard_mp4_active",
+      onClick = {},
+      modifier = Modifier.fillMaxWidth(),
+    )
   }
 }
 

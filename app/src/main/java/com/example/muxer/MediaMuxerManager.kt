@@ -4,7 +4,6 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaCodec
-import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
@@ -12,8 +11,6 @@ import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
-import com.example.settings.ContainerMuxerOption
-import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,19 +19,17 @@ import java.util.Locale
 data class MuxerOutput(val uri: Uri, val displayName: String, val filePath: String? = null)
 
 /**
- * Thread-safe MediaMuxer coordinator supporting direct progressive MP4 output (Hybrid MP4) or
- * temporary staging capture with clean MediaExtractor -> MediaMuxer final MP4 remuxing, publishing
- * completed files via MediaStore Movies/FrameCut.
+ * Thread-safe native android.media.MediaMuxer coordinator writing Standard MP4 directly to
+ * MediaStore (Movies/FrameCut). Normalizes video and audio presentation timestamps from 0L so
+ * every recording starts cleanly at 00:00:00.
  */
 class MediaMuxerManager(
   private val context: Context,
   private val expectAudioTrackInitial: Boolean,
-  private val containerMuxer: ContainerMuxerOption = ContainerMuxerOption.HYBRID_MP4,
 ) {
   private val lock = Any()
   private var mediaMuxer: MediaMuxer? = null
   private var parcelFd: ParcelFileDescriptor? = null
-  private var stagingFile: File? = null
   private var outputUri: Uri? = null
   private var displayName: String = ""
 
@@ -43,6 +38,8 @@ class MediaMuxerManager(
   private var expectAudio = expectAudioTrackInitial
   private var muxerStarted = false
   private var videoFramesWritten = 0L
+  private var videoStartPresentationTimeUs = -1L
+  private var audioStartPresentationTimeUs = -1L
   private var lastVideoPtsUs = -1L
   private var lastAudioPtsUs = -1L
   private var isReleased = false
@@ -74,14 +71,7 @@ class MediaMuxerManager(
           }
       outputUri = uri
       parcelFd = pfd
-
-      if (containerMuxer == ContainerMuxerOption.MKV_REMUX_MP4) {
-        val tempFile = File(context.cacheDir, "framecut_staging_$timestamp.mp4")
-        stagingFile = tempFile
-        mediaMuxer = MediaMuxer(tempFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-      } else {
-        mediaMuxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-      }
+      mediaMuxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
       return MuxerOutput(uri = uri, displayName = displayName)
     }
   }
@@ -118,7 +108,7 @@ class MediaMuxerManager(
 
   fun isStarted(): Boolean = synchronized(lock) { muxerStarted }
 
-  fun awaitStarted(timeoutMs: Long = 500L): Boolean {
+  fun awaitStarted(timeoutMs: Long = 2500L): Boolean {
     synchronized(lock) {
       if (muxerStarted) return true
       if (isReleased) return false
@@ -148,7 +138,7 @@ class MediaMuxerManager(
       (lock as Object).notifyAll()
       Log.d(
         TAG,
-        "MediaMuxer started (mode=${containerMuxer.label}, videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex)",
+        "Standard MP4 MediaMuxer started (videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex)",
       )
     }
   }
@@ -159,11 +149,19 @@ class MediaMuxerManager(
       if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
       if (info.size <= 0) return
 
+      if (videoStartPresentationTimeUs < 0L) {
+        videoStartPresentationTimeUs = info.presentationTimeUs
+      }
+      val normalizedPtsUs =
+        normalizePresentationTimeUs(
+          rawPtsUs = info.presentationTimeUs,
+          anchorPtsUs = videoStartPresentationTimeUs,
+          lastWrittenPtsUs = lastVideoPtsUs,
+        )
+      lastVideoPtsUs = normalizedPtsUs
+
       val adjustedInfo = MediaCodec.BufferInfo().apply {
-        val safePts =
-          if (info.presentationTimeUs <= lastVideoPtsUs) lastVideoPtsUs + 1 else info.presentationTimeUs
-        set(info.offset, info.size, safePts, info.flags)
-        lastVideoPtsUs = safePts
+        set(info.offset, info.size, normalizedPtsUs, info.flags)
       }
       buffer.position(adjustedInfo.offset)
       buffer.limit(adjustedInfo.offset + adjustedInfo.size)
@@ -181,11 +179,19 @@ class MediaMuxerManager(
       if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
       if (info.size <= 0) return
 
+      if (audioStartPresentationTimeUs < 0L) {
+        audioStartPresentationTimeUs = info.presentationTimeUs
+      }
+      val normalizedPtsUs =
+        normalizePresentationTimeUs(
+          rawPtsUs = info.presentationTimeUs,
+          anchorPtsUs = audioStartPresentationTimeUs,
+          lastWrittenPtsUs = lastAudioPtsUs,
+        )
+      lastAudioPtsUs = normalizedPtsUs
+
       val adjustedInfo = MediaCodec.BufferInfo().apply {
-        val safePts =
-          if (info.presentationTimeUs <= lastAudioPtsUs) lastAudioPtsUs + 1 else info.presentationTimeUs
-        set(info.offset, info.size, safePts, info.flags)
-        lastAudioPtsUs = safePts
+        set(info.offset, info.size, normalizedPtsUs, info.flags)
       }
       buffer.position(adjustedInfo.offset)
       buffer.limit(adjustedInfo.offset + adjustedInfo.size)
@@ -198,6 +204,7 @@ class MediaMuxerManager(
     synchronized(lock) {
       if (isReleased) return null
       isReleased = true
+      (lock as Object).notifyAll()
       var validOutput = false
 
       try {
@@ -212,18 +219,6 @@ class MediaMuxerManager(
         mediaMuxer = null
       }
 
-      if (validOutput && containerMuxer == ContainerMuxerOption.MKV_REMUX_MP4) {
-        val temp = stagingFile
-        val pfd = parcelFd
-        if (temp != null && temp.exists() && pfd != null) {
-          validOutput = remuxStagingToMp4(temp, pfd)
-        } else {
-          validOutput = false
-        }
-      }
-
-      runCatching { stagingFile?.delete() }
-      stagingFile = null
       runCatching { parcelFd?.close() }
       parcelFd = null
 
@@ -245,54 +240,16 @@ class MediaMuxerManager(
     }
   }
 
-  private fun remuxStagingToMp4(staging: File, destPfd: ParcelFileDescriptor): Boolean {
-    val extractor = MediaExtractor()
-    var destMuxer: MediaMuxer? = null
-    return try {
-      extractor.setDataSource(staging.absolutePath)
-      destMuxer = MediaMuxer(destPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-      val trackMap = HashMap<Int, Int>()
-      var maxInputSize = 256 * 1024
-      for (i in 0 until extractor.trackCount) {
-        val format = extractor.getTrackFormat(i)
-        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-          maxInputSize = maxOf(maxInputSize, format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE))
-        }
-        val destTrack = destMuxer.addTrack(format)
-        trackMap[i] = destTrack
-        extractor.selectTrack(i)
-      }
-
-      destMuxer.start()
-      val buffer = ByteBuffer.allocateDirect(maxInputSize)
-      val info = MediaCodec.BufferInfo()
-
-      while (true) {
-        buffer.clear()
-        val sampleSize = extractor.readSampleData(buffer, 0)
-        if (sampleSize < 0) break
-        val trackIdx = extractor.sampleTrackIndex
-        val destTrack = trackMap[trackIdx]
-        if (destTrack != null) {
-          info.set(0, sampleSize, extractor.sampleTime, extractor.sampleFlags)
-          destMuxer.writeSampleData(destTrack, buffer, info)
-        }
-        extractor.advance()
-      }
-
-      destMuxer.stop()
-      true
-    } catch (e: Exception) {
-      Log.e(TAG, "Remux pass failed", e)
-      false
-    } finally {
-      runCatching { destMuxer?.release() }
-      runCatching { extractor.release() }
-    }
-  }
-
   companion object {
     private const val TAG = "MediaMuxerManager"
+
+    fun normalizePresentationTimeUs(
+      rawPtsUs: Long,
+      anchorPtsUs: Long,
+      lastWrittenPtsUs: Long,
+    ): Long {
+      val relativeUs = (rawPtsUs - anchorPtsUs).coerceAtLeast(0L)
+      return if (relativeUs <= lastWrittenPtsUs) lastWrittenPtsUs + 1L else relativeUs
+    }
   }
 }

@@ -65,11 +65,6 @@ enum class ColorStandardOption(val label: String) {
   BT_2020("BT.2020 (HDR)"),
 }
 
-enum class ContainerMuxerOption(val label: String) {
-  HYBRID_MP4("Hybrid / Fragmented MP4"),
-  MKV_REMUX_MP4("MKV to MP4 Remux"),
-}
-
 enum class RenderingModeOption(val label: String) {
   ASYNC_SURFACE("Asynchronous Rendering"),
   DIRECT_SURFACE("Direct Rendering"),
@@ -124,7 +119,6 @@ data class RecordingSettings(
   val colorDepth: ColorDepthOption = ColorDepthOption.BIT_8,
   val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
   val colorStandard: ColorStandardOption = ColorStandardOption.BT_709,
-  val containerMuxer: ContainerMuxerOption = ContainerMuxerOption.HYBRID_MP4,
   val renderingMode: RenderingModeOption = RenderingModeOption.ASYNC_SURFACE,
   val gopInterval: GopIntervalOption = GopIntervalOption.SEC_1,
   val colorRange: ColorRangeOption = ColorRangeOption.LIMITED,
@@ -153,6 +147,7 @@ object InternalRecordingConfig {
   const val AUDIO_CHANNEL_COUNT = 1
 
   const val CHROMA_SUBSAMPLING_LABEL = "4:2:0"
+  const val OUTPUT_CONTAINER_LABEL = "Standard MP4"
 }
 
 class RecordingSettingsRepository(private val context: Context) {
@@ -172,7 +167,6 @@ class RecordingSettingsRepository(private val context: Context) {
     val COLOR_DEPTH = stringPreferencesKey("color_depth")
     val VIDEO_FPS = stringPreferencesKey("video_fps")
     val COLOR_STANDARD = stringPreferencesKey("color_standard")
-    val CONTAINER_MUXER = stringPreferencesKey("container_muxer")
     val RENDERING_MODE = stringPreferencesKey("rendering_mode")
     val GOP_INTERVAL = stringPreferencesKey("gop_interval")
     val COLOR_RANGE = stringPreferencesKey("color_range")
@@ -207,8 +201,6 @@ class RecordingSettingsRepository(private val context: Context) {
           enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
         colorStandard =
           enumValueOrDefault(prefs[Keys.COLOR_STANDARD], ColorStandardOption.BT_709),
-        containerMuxer =
-          enumValueOrDefault(prefs[Keys.CONTAINER_MUXER], ContainerMuxerOption.HYBRID_MP4),
         renderingMode =
           enumValueOrDefault(prefs[Keys.RENDERING_MODE], RenderingModeOption.ASYNC_SURFACE),
         gopInterval =
@@ -254,10 +246,6 @@ class RecordingSettingsRepository(private val context: Context) {
 
   suspend fun setColorStandard(standard: ColorStandardOption) {
     context.settingsDataStore.edit { it[Keys.COLOR_STANDARD] = standard.name }
-  }
-
-  suspend fun setContainerMuxer(muxer: ContainerMuxerOption) {
-    context.settingsDataStore.edit { it[Keys.CONTAINER_MUXER] = muxer.name }
   }
 
   suspend fun setRenderingMode(mode: RenderingModeOption) {

@@ -270,7 +270,7 @@ class VideoEncoder(
               info.size > 0 &&
               (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
           ) {
-            if (muxerManager.isStarted() || muxerManager.awaitStarted(600L)) {
+            if (muxerManager.isStarted() || muxerManager.awaitStarted(2500L)) {
               muxerManager.writeVideoSample(encodedData, info)
             }
           }
@@ -381,7 +381,7 @@ class VideoEncoder(
               bufferInfo.size > 0 &&
               (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
           ) {
-            if (muxerManager.isStarted() || muxerManager.awaitStarted(600L)) {
+            if (muxerManager.isStarted() || muxerManager.awaitStarted(2500L)) {
               muxerManager.writeVideoSample(encodedData, bufferInfo)
             }
           }
