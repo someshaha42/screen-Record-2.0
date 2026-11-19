@@ -37,14 +37,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ShutterSpeed
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.StayCurrentLandscape
 import androidx.compose.material.icons.filled.StayCurrentPortrait
 import androidx.compose.material.icons.filled.Stop
@@ -96,10 +101,12 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.service.RecordingPhase
 import com.example.settings.AudioSourceOption
+import com.example.settings.GraphicsBackend
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoFpsOption
 import com.example.ui.RecorderUiState
 import com.example.ui.components.RegionBorderOverlayCanvas
 import com.example.ui.theme.LocalStudioColors
@@ -117,6 +124,8 @@ fun MainScreen(
   onSelectOrientationMode: (OrientationMode) -> Unit,
   onSelectAudioSource: (AudioSourceOption) -> Unit,
   onSelectBitrate: (VideoBitrateOption) -> Unit,
+  onSelectGraphicsBackend: (GraphicsBackend) -> Unit,
+  onSelectVideoFps: (VideoFpsOption) -> Unit,
   onSelectRegionAnimation: (RegionAnimationOption) -> Unit,
   onEditRegion: () -> Unit,
   onRequestOverlayPermission: () -> Unit,
@@ -254,6 +263,8 @@ fun MainScreen(
               onSelectOrientationMode = onSelectOrientationMode,
               onSelectAudioSource = onSelectAudioSource,
               onSelectBitrate = onSelectBitrate,
+              onSelectGraphicsBackend = onSelectGraphicsBackend,
+              onSelectVideoFps = onSelectVideoFps,
               onSelectRegionAnimation = onSelectRegionAnimation,
               onEditRegion = onEditRegion,
               onRequestOverlayPermission = onRequestOverlayPermission,
@@ -295,6 +306,8 @@ fun MainScreen(
             onSelectOrientationMode = onSelectOrientationMode,
             onSelectAudioSource = onSelectAudioSource,
             onSelectBitrate = onSelectBitrate,
+            onSelectGraphicsBackend = onSelectGraphicsBackend,
+            onSelectVideoFps = onSelectVideoFps,
             onSelectRegionAnimation = onSelectRegionAnimation,
             onEditRegion = onEditRegion,
             onRequestOverlayPermission = onRequestOverlayPermission,
@@ -430,6 +443,8 @@ private fun SettingsCardsSection(
   onSelectOrientationMode: (OrientationMode) -> Unit,
   onSelectAudioSource: (AudioSourceOption) -> Unit,
   onSelectBitrate: (VideoBitrateOption) -> Unit,
+  onSelectGraphicsBackend: (GraphicsBackend) -> Unit,
+  onSelectVideoFps: (VideoFpsOption) -> Unit,
   onSelectRegionAnimation: (RegionAnimationOption) -> Unit,
   onEditRegion: () -> Unit,
   onRequestOverlayPermission: () -> Unit,
@@ -487,6 +502,16 @@ private fun SettingsCardsSection(
           enabled = isIdle,
           onSelectBitrate = onSelectBitrate,
         )
+        GraphicsBackendCard(
+          selectedBackend = uiState.settings.graphicsBackend,
+          enabled = isIdle,
+          onSelectBackend = onSelectGraphicsBackend,
+        )
+        VideoFpsCard(
+          selectedFps = uiState.settings.videoFps,
+          enabled = isIdle,
+          onSelectFps = onSelectVideoFps,
+        )
       }
     }
   } else {
@@ -534,6 +559,22 @@ private fun SettingsCardsSection(
           selectedBitrate = uiState.settings.videoBitrate,
           enabled = isIdle,
           onSelectBitrate = onSelectBitrate,
+        )
+      }
+
+      Box(modifier = Modifier.alpha(settingsAlpha)) {
+        GraphicsBackendCard(
+          selectedBackend = uiState.settings.graphicsBackend,
+          enabled = isIdle,
+          onSelectBackend = onSelectGraphicsBackend,
+        )
+      }
+
+      Box(modifier = Modifier.alpha(settingsAlpha)) {
+        VideoFpsCard(
+          selectedFps = uiState.settings.videoFps,
+          enabled = isIdle,
+          onSelectFps = onSelectVideoFps,
         )
       }
 
@@ -1055,6 +1096,82 @@ private fun VideoBitrateCard(
             ),
         )
       }
+    }
+  }
+}
+
+@Composable
+private fun GraphicsBackendCard(
+  selectedBackend: GraphicsBackend,
+  enabled: Boolean,
+  onSelectBackend: (GraphicsBackend) -> Unit,
+) {
+  SettingsSectionCard(
+    title = stringResource(R.string.section_graphics),
+    icon = Icons.Default.Memory,
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      OptionTile(
+        title = stringResource(R.string.graphics_vulkan),
+        subtitle = stringResource(R.string.graphics_vulkan_desc),
+        icon = Icons.Default.Bolt,
+        selected = selectedBackend == GraphicsBackend.VULKAN,
+        enabled = enabled,
+        testTag = "graphics_vulkan",
+        onClick = { onSelectBackend(GraphicsBackend.VULKAN) },
+        modifier = Modifier.weight(1f),
+      )
+      OptionTile(
+        title = stringResource(R.string.graphics_opengl3),
+        subtitle = stringResource(R.string.graphics_opengl3_desc),
+        icon = Icons.Default.Layers,
+        selected = selectedBackend == GraphicsBackend.OPENGL_ES_3,
+        enabled = enabled,
+        testTag = "graphics_opengl3",
+        onClick = { onSelectBackend(GraphicsBackend.OPENGL_ES_3) },
+        modifier = Modifier.weight(1f),
+      )
+    }
+  }
+}
+
+@Composable
+private fun VideoFpsCard(
+  selectedFps: VideoFpsOption,
+  enabled: Boolean,
+  onSelectFps: (VideoFpsOption) -> Unit,
+) {
+  SettingsSectionCard(
+    title = stringResource(R.string.section_video_fps),
+    icon = Icons.Default.Speed,
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      OptionTile(
+        title = stringResource(R.string.fps_30),
+        subtitle = stringResource(R.string.fps_30_desc),
+        icon = Icons.Default.ShutterSpeed,
+        selected = selectedFps == VideoFpsOption.FPS_30,
+        enabled = enabled,
+        testTag = "fps_30",
+        onClick = { onSelectFps(VideoFpsOption.FPS_30) },
+        modifier = Modifier.weight(1f),
+      )
+      OptionTile(
+        title = stringResource(R.string.fps_60),
+        subtitle = stringResource(R.string.fps_60_desc),
+        icon = Icons.Default.Speed,
+        selected = selectedFps == VideoFpsOption.FPS_60,
+        enabled = enabled,
+        testTag = "fps_60",
+        onClick = { onSelectFps(VideoFpsOption.FPS_60) },
+        modifier = Modifier.weight(1f),
+      )
     }
   }
 }

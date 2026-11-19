@@ -3,6 +3,7 @@ package com.example
 import android.media.MediaFormat
 import com.example.region.RegionSelectionManager
 import com.example.settings.AudioSourceOption
+import com.example.settings.GraphicsBackend
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
@@ -10,6 +11,7 @@ import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoFpsOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,6 +28,11 @@ class RecorderCoreUnitTest {
     assertEquals(30, InternalRecordingConfig.TARGET_FPS)
     assertEquals(AudioSourceOption.INTERNAL, defaults.audioSource)
     assertEquals(VideoBitrateOption.MBPS_150, defaults.videoBitrate)
+    assertEquals(GraphicsBackend.VULKAN, defaults.graphicsBackend)
+    assertEquals(listOf(GraphicsBackend.VULKAN, GraphicsBackend.OPENGL_ES_3), GraphicsBackend.entries)
+    assertEquals(VideoFpsOption.FPS_30, defaults.videoFps)
+    assertEquals(listOf(VideoFpsOption.FPS_30, VideoFpsOption.FPS_60), VideoFpsOption.entries)
+    assertEquals(listOf(30, 60), VideoFpsOption.entries.map { it.fps })
     assertEquals(
       listOf(
         VideoBitrateOption.MBPS_100,

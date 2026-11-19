@@ -10,6 +10,7 @@ import android.view.Surface
 import com.example.muxer.MediaMuxerManager
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoFpsOption
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ChipsetFamily {
@@ -28,7 +29,7 @@ data class EncoderSelection(
 )
 
 /**
- * Hardware-first fixed H.265/HEVC (30 FPS) MediaCodec encoder with chipset detection (Snapdragon
+ * Hardware-first H.265/HEVC (30/60 FPS) MediaCodec encoder with chipset detection (Snapdragon
  * c2.qti.hevc.encoder, MediaTek c2.mtk.hevc.encoder), automatic capability clamping, and dedicated
  * surface input.
  */
@@ -37,6 +38,7 @@ class VideoEncoder(
   private val requestedHeight: Int,
   private val bitrateOption: VideoBitrateOption,
   private val muxerManager: MediaMuxerManager,
+  private val fpsOption: VideoFpsOption = VideoFpsOption.FPS_30,
 ) {
   private var mediaCodec: MediaCodec? = null
   private var inputSurface: Surface? = null
@@ -50,6 +52,7 @@ class VideoEncoder(
         requestedWidth = requestedWidth,
         requestedHeight = requestedHeight,
         bitrateOption = bitrateOption,
+        fpsOption = fpsOption,
       )
 
     val codec =
@@ -85,7 +88,7 @@ class VideoEncoder(
     Log.i(
       TAG,
       "VideoEncoder started: codec=${selected.codecName} (H.265), " +
-        "fps=${InternalRecordingConfig.TARGET_FPS}, hw=${selected.isHardwareAccelerated}, " +
+        "fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, " +
         "chipset=${selected.chipsetFamily}, size=${selected.alignedWidth}x${selected.alignedHeight}, " +
         "bitrate=${selected.effectiveBitrateBps / 1_000_000}Mbps",
     )
@@ -105,13 +108,13 @@ class VideoEncoder(
       .apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT, InternalRecordingConfig.SURFACE_COLOR_FORMAT)
         setInteger(MediaFormat.KEY_BIT_RATE, selected.effectiveBitrateBps)
-        setInteger(MediaFormat.KEY_FRAME_RATE, InternalRecordingConfig.TARGET_FPS)
+        setInteger(MediaFormat.KEY_FRAME_RATE, fpsOption.fps)
         setInteger(
           MediaFormat.KEY_I_FRAME_INTERVAL,
           InternalRecordingConfig.I_FRAME_INTERVAL_SECONDS,
         )
         if (includeAdvanced) {
-          setInteger(MediaFormat.KEY_CAPTURE_RATE, InternalRecordingConfig.TARGET_FPS)
+          setInteger(MediaFormat.KEY_CAPTURE_RATE, fpsOption.fps)
           setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
           configureBitrateModeAndProfile(this, codecInfo)
         }
@@ -260,6 +263,7 @@ class VideoEncoder(
       availableCodecs: List<MediaCodecInfo> =
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.toList(),
       chipsetFamily: ChipsetFamily = detectChipsetFamily(),
+      fpsOption: VideoFpsOption = VideoFpsOption.FPS_30,
     ): EncoderSelection {
       val hevcEncoders =
         availableCodecs.filter { info ->
@@ -355,7 +359,7 @@ class VideoEncoder(
               videoCaps,
               alignedW,
               alignedH,
-              InternalRecordingConfig.TARGET_FPS.toDouble(),
+              fpsOption.fps.toDouble(),
             )
         ) {
           val factor = scales[idx++]

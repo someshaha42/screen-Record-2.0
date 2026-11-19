@@ -31,12 +31,14 @@ import com.example.region.PixelRegion
 import com.example.region.RegionOverlayManager
 import com.example.region.RegionSelectionManager
 import com.example.settings.AudioSourceOption
+import com.example.settings.GraphicsBackend
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -206,6 +208,20 @@ class RecordingService : Service() {
           )
         }
         .getOrDefault(VideoBitrateOption.MBPS_150)
+    val graphicsBackend =
+      runCatching {
+          GraphicsBackend.valueOf(
+            intent.getStringExtra(EXTRA_GRAPHICS_BACKEND) ?: GraphicsBackend.VULKAN.name,
+          )
+        }
+        .getOrDefault(GraphicsBackend.VULKAN)
+    val videoFps =
+      runCatching {
+          VideoFpsOption.valueOf(
+            intent.getStringExtra(EXTRA_VIDEO_FPS) ?: VideoFpsOption.FPS_30.name,
+          )
+        }
+        .getOrDefault(VideoFpsOption.FPS_30)
     val animation =
       runCatching {
           RegionAnimationOption.valueOf(
@@ -229,6 +245,8 @@ class RecordingService : Service() {
         orientationMode = orientationMode,
         audioSource = audioSource,
         videoBitrate = bitrate,
+        graphicsBackend = graphicsBackend,
+        videoFps = videoFps,
         regionAnimation = animation,
         selectedRegion = normRegion,
       )
@@ -303,7 +321,14 @@ class RecordingService : Service() {
       muxer.prepare()
       muxerManager = muxer
 
-      val encoder = VideoEncoder(targetW, targetH, settings.videoBitrate, muxer)
+      val encoder =
+        VideoEncoder(
+          requestedWidth = targetW,
+          requestedHeight = targetH,
+          bitrateOption = settings.videoBitrate,
+          muxerManager = muxer,
+          fpsOption = settings.videoFps,
+        )
       val selection: EncoderSelection = encoder.prepare()
       videoEncoder = encoder
 
@@ -333,6 +358,8 @@ class RecordingService : Service() {
           outputWidth = selection.alignedWidth,
           outputHeight = selection.alignedHeight,
           cropRegion = pixelRegion,
+          targetFps = settings.videoFps.fps,
+          graphicsBackend = settings.graphicsBackend,
           onProjectionStopped = { stopRecording() },
         )
       screenCaptureManager = captureMgr
@@ -624,6 +651,8 @@ class RecordingService : Service() {
     const val EXTRA_ORIENTATION_MODE = "extra_orientation_mode"
     const val EXTRA_AUDIO_SOURCE = "extra_audio_source"
     const val EXTRA_BITRATE = "extra_bitrate"
+    const val EXTRA_GRAPHICS_BACKEND = "extra_graphics_backend"
+    const val EXTRA_VIDEO_FPS = "extra_video_fps"
     const val EXTRA_REGION_ANIMATION = "extra_region_animation"
     const val EXTRA_REGION_LEFT = "extra_region_left"
     const val EXTRA_REGION_TOP = "extra_region_top"
@@ -644,6 +673,8 @@ class RecordingService : Service() {
         putExtra(EXTRA_ORIENTATION_MODE, settings.orientationMode.name)
         putExtra(EXTRA_AUDIO_SOURCE, settings.audioSource.name)
         putExtra(EXTRA_BITRATE, settings.videoBitrate.name)
+        putExtra(EXTRA_GRAPHICS_BACKEND, settings.graphicsBackend.name)
+        putExtra(EXTRA_VIDEO_FPS, settings.videoFps.name)
         putExtra(EXTRA_REGION_ANIMATION, settings.regionAnimation.name)
         putExtra(EXTRA_REGION_LEFT, settings.selectedRegion.left)
         putExtra(EXTRA_REGION_TOP, settings.selectedRegion.top)

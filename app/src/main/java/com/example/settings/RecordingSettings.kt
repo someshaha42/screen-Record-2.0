@@ -45,6 +45,16 @@ enum class RegionAnimationOption {
   HIDE,
 }
 
+enum class GraphicsBackend(val label: String) {
+  VULKAN("Vulkan"),
+  OPENGL_ES_3("OpenGL 3.0"),
+}
+
+enum class VideoFpsOption(val fps: Int, val label: String) {
+  FPS_30(30, "30 FPS"),
+  FPS_60(60, "60 FPS"),
+}
+
 /**
  * Normalized rectangular region in [0f..1f] relative to the full screen dimensions. Storing
  * normalized fractions allows restoring the selected area consistently across launches.
@@ -72,6 +82,8 @@ data class RecordingSettings(
   val orientationMode: OrientationMode = OrientationMode.PORTRAIT,
   val audioSource: AudioSourceOption = AudioSourceOption.INTERNAL,
   val videoBitrate: VideoBitrateOption = VideoBitrateOption.MBPS_150,
+  val graphicsBackend: GraphicsBackend = GraphicsBackend.VULKAN,
+  val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
   val regionAnimation: RegionAnimationOption = RegionAnimationOption.SHOW,
   val selectedRegion: NormalizedRegion = NormalizedRegion(),
 )
@@ -103,6 +115,8 @@ class RecordingSettingsRepository(private val context: Context) {
     val ORIENTATION_MODE = stringPreferencesKey("orientation_mode")
     val AUDIO_SOURCE = stringPreferencesKey("audio_source")
     val VIDEO_BITRATE = stringPreferencesKey("video_bitrate")
+    val GRAPHICS_BACKEND = stringPreferencesKey("graphics_backend")
+    val VIDEO_FPS = stringPreferencesKey("video_fps")
     val REGION_ANIMATION = stringPreferencesKey("region_animation")
     val REGION_LEFT = floatPreferencesKey("region_left")
     val REGION_TOP = floatPreferencesKey("region_top")
@@ -120,6 +134,10 @@ class RecordingSettingsRepository(private val context: Context) {
           enumValueOrDefault(prefs[Keys.AUDIO_SOURCE], AudioSourceOption.INTERNAL),
         videoBitrate =
           enumValueOrDefault(prefs[Keys.VIDEO_BITRATE], VideoBitrateOption.MBPS_150),
+        graphicsBackend =
+          enumValueOrDefault(prefs[Keys.GRAPHICS_BACKEND], GraphicsBackend.VULKAN),
+        videoFps =
+          enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
         regionAnimation =
           enumValueOrDefault(prefs[Keys.REGION_ANIMATION], RegionAnimationOption.SHOW),
         selectedRegion =
@@ -147,6 +165,14 @@ class RecordingSettingsRepository(private val context: Context) {
 
   suspend fun setVideoBitrate(bitrate: VideoBitrateOption) {
     context.settingsDataStore.edit { it[Keys.VIDEO_BITRATE] = bitrate.name }
+  }
+
+  suspend fun setGraphicsBackend(backend: GraphicsBackend) {
+    context.settingsDataStore.edit { it[Keys.GRAPHICS_BACKEND] = backend.name }
+  }
+
+  suspend fun setVideoFps(fps: VideoFpsOption) {
+    context.settingsDataStore.edit { it[Keys.VIDEO_FPS] = fps.name }
   }
 
   suspend fun setRegionAnimation(animation: RegionAnimationOption) {

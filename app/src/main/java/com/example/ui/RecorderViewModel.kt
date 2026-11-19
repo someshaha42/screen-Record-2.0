@@ -17,6 +17,7 @@ import com.example.service.RecordingService
 import com.example.service.RecordingSessionState
 import com.example.service.RecordingSessionStore
 import com.example.settings.AudioSourceOption
+import com.example.settings.GraphicsBackend
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
@@ -24,6 +25,7 @@ import com.example.settings.RecordingSettings
 import com.example.settings.RecordingSettingsRepository
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -155,6 +157,22 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setVideoBitrate(bitrate) }
   }
 
+  @Volatile private var latestGraphicsBackendOverride: GraphicsBackend? = null
+
+  fun setGraphicsBackend(backend: GraphicsBackend) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestGraphicsBackendOverride = backend
+    viewModelScope.launch { settingsRepo.setGraphicsBackend(backend) }
+  }
+
+  @Volatile private var latestVideoFpsOverride: VideoFpsOption? = null
+
+  fun setVideoFps(fps: VideoFpsOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestVideoFpsOverride = fps
+    viewModelScope.launch { settingsRepo.setVideoFps(fps) }
+  }
+
   @Volatile private var latestRegionAnimationOverride: RegionAnimationOption? = null
 
   fun setRegionAnimation(option: RegionAnimationOption) {
@@ -192,10 +210,14 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
   fun startRecording(resultCode: Int, resultData: Intent) {
     val baseSettings = uiState.value.settings
     val effectiveOrientation = latestOrientationModeOverride ?: baseSettings.orientationMode
+    val effectiveGraphics = latestGraphicsBackendOverride ?: baseSettings.graphicsBackend
+    val effectiveFps = latestVideoFpsOverride ?: baseSettings.videoFps
     val effectiveAnimation = latestRegionAnimationOverride ?: baseSettings.regionAnimation
     val currentSettings =
       baseSettings.copy(
         orientationMode = effectiveOrientation,
+        graphicsBackend = effectiveGraphics,
+        videoFps = effectiveFps,
         regionAnimation = effectiveAnimation,
       )
     val intent =

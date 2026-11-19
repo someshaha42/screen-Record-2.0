@@ -58,6 +58,18 @@
     <string name="bitrate_300">300 Mbps</string>
     <string name="bitrate_350">350 Mbps</string>
 
+    <string name="section_graphics">Graphics</string>
+    <string name="graphics_vulkan">Vulkan</string>
+    <string name="graphics_vulkan_desc">Next-gen low-overhead GPU pipeline</string>
+    <string name="graphics_opengl3">OpenGL 3.0</string>
+    <string name="graphics_opengl3_desc">OpenGL ES 3.0 shader pipeline</string>
+
+    <string name="section_video_fps">FPS</string>
+    <string name="fps_30">30 FPS</string>
+    <string name="fps_30_desc">Balanced battery &amp; thermal</string>
+    <string name="fps_60">60 FPS</string>
+    <string name="fps_60_desc">Ultra-smooth high frame rate</string>
+
     <string name="anim_show">Show</string>
     <string name="anim_hide">Hide</string>
 

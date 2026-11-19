@@ -174,6 +174,8 @@ private fun FrameCutApp(
           onSelectOrientationMode = remember(viewModel) { viewModel::setOrientationMode },
           onSelectAudioSource = remember(viewModel) { viewModel::setAudioSource },
           onSelectBitrate = remember(viewModel) { viewModel::setVideoBitrate },
+          onSelectGraphicsBackend = remember(viewModel) { viewModel::setGraphicsBackend },
+          onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
           onSelectRegionAnimation = remember(viewModel) { viewModel::setRegionAnimation },
           onEditRegion = remember(viewModel) { viewModel::openRegionEditor },
           onRequestOverlayPermission = onOpenOverlaySettings,
