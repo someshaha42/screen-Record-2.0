@@ -30,16 +30,21 @@ import com.example.muxer.MediaMuxerManager
 import com.example.region.PixelRegion
 import com.example.region.RegionOverlayManager
 import com.example.region.RegionSelectionManager
+import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
-import com.example.settings.ColorMode
-import com.example.settings.GraphicsBackend
+import com.example.settings.BitrateModeOption
+import com.example.settings.ColorDepthOption
+import com.example.settings.ColorRangeOption
+import com.example.settings.ColorStandardOption
+import com.example.settings.ContainerMuxerOption
+import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
+import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
-import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -210,20 +215,20 @@ class RecordingService : Service() {
           )
         }
         .getOrDefault(VideoBitrateOption.MBPS_150)
-    val colorMode =
+    val bitrateMode =
       runCatching {
-          ColorMode.valueOf(
-            intent.getStringExtra(EXTRA_COLOR_MODE) ?: ColorMode.NORMAL.name,
+          BitrateModeOption.valueOf(
+            intent.getStringExtra(EXTRA_BITRATE_MODE) ?: BitrateModeOption.VBR.name,
           )
         }
-        .getOrDefault(ColorMode.NORMAL)
-    val graphicsBackend =
+        .getOrDefault(BitrateModeOption.VBR)
+    val colorDepth =
       runCatching {
-          GraphicsBackend.valueOf(
-            intent.getStringExtra(EXTRA_GRAPHICS_BACKEND) ?: GraphicsBackend.VULKAN.name,
+          ColorDepthOption.valueOf(
+            intent.getStringExtra(EXTRA_COLOR_DEPTH) ?: ColorDepthOption.BIT_8.name,
           )
         }
-        .getOrDefault(GraphicsBackend.VULKAN)
+        .getOrDefault(ColorDepthOption.BIT_8)
     val videoFps =
       runCatching {
           VideoFpsOption.valueOf(
@@ -231,13 +236,48 @@ class RecordingService : Service() {
           )
         }
         .getOrDefault(VideoFpsOption.FPS_30)
-    val videoCodec =
+    val colorStandard =
       runCatching {
-          VideoCodecOption.valueOf(
-            intent.getStringExtra(EXTRA_VIDEO_CODEC) ?: VideoCodecOption.H265.name,
+          ColorStandardOption.valueOf(
+            intent.getStringExtra(EXTRA_COLOR_STANDARD) ?: ColorStandardOption.BT_709.name,
           )
         }
-        .getOrDefault(VideoCodecOption.H265)
+        .getOrDefault(ColorStandardOption.BT_709)
+    val containerMuxer =
+      runCatching {
+          ContainerMuxerOption.valueOf(
+            intent.getStringExtra(EXTRA_CONTAINER_MUXER) ?: ContainerMuxerOption.HYBRID_MP4.name,
+          )
+        }
+        .getOrDefault(ContainerMuxerOption.HYBRID_MP4)
+    val renderingMode =
+      runCatching {
+          RenderingModeOption.valueOf(
+            intent.getStringExtra(EXTRA_RENDERING_MODE) ?: RenderingModeOption.ASYNC_SURFACE.name,
+          )
+        }
+        .getOrDefault(RenderingModeOption.ASYNC_SURFACE)
+    val gopInterval =
+      runCatching {
+          GopIntervalOption.valueOf(
+            intent.getStringExtra(EXTRA_GOP_INTERVAL) ?: GopIntervalOption.SEC_1.name,
+          )
+        }
+        .getOrDefault(GopIntervalOption.SEC_1)
+    val colorRange =
+      runCatching {
+          ColorRangeOption.valueOf(
+            intent.getStringExtra(EXTRA_COLOR_RANGE) ?: ColorRangeOption.LIMITED.name,
+          )
+        }
+        .getOrDefault(ColorRangeOption.LIMITED)
+    val audioFormat =
+      runCatching {
+          AudioFormatOption.valueOf(
+            intent.getStringExtra(EXTRA_AUDIO_FORMAT) ?: AudioFormatOption.MONO_AAC.name,
+          )
+        }
+        .getOrDefault(AudioFormatOption.MONO_AAC)
     val animation =
       runCatching {
           RegionAnimationOption.valueOf(
@@ -261,12 +301,17 @@ class RecordingService : Service() {
         orientationMode = orientationMode,
         audioSource = audioSource,
         videoBitrate = bitrate,
-        colorMode = colorMode,
-        graphicsBackend = graphicsBackend,
-        videoFps = videoFps,
-        videoCodec = videoCodec,
         regionAnimation = animation,
         selectedRegion = normRegion,
+        bitrateMode = bitrateMode,
+        colorDepth = colorDepth,
+        videoFps = videoFps,
+        colorStandard = colorStandard,
+        containerMuxer = containerMuxer,
+        renderingMode = renderingMode,
+        gopInterval = gopInterval,
+        colorRange = colorRange,
+        audioFormat = audioFormat,
       )
     currentMode = mode
 
@@ -335,7 +380,12 @@ class RecordingService : Service() {
           PackageManager.PERMISSION_GRANTED
       val expectAudio = hasAudioPermission
 
-      val muxer = MediaMuxerManager(this, expectAudioTrackInitial = expectAudio)
+      val muxer =
+        MediaMuxerManager(
+          context = this,
+          expectAudioTrackInitial = expectAudio,
+          containerMuxer = settings.containerMuxer,
+        )
       muxer.prepare()
       muxerManager = muxer
 
@@ -346,8 +396,12 @@ class RecordingService : Service() {
           bitrateOption = settings.videoBitrate,
           muxerManager = muxer,
           fpsOption = settings.videoFps,
-          codecOption = settings.videoCodec,
-          colorMode = settings.colorMode,
+          bitrateMode = settings.bitrateMode,
+          colorDepth = settings.colorDepth,
+          colorStandard = settings.colorStandard,
+          colorRange = settings.colorRange,
+          gopInterval = settings.gopInterval,
+          renderingMode = settings.renderingMode,
         )
       val selection: EncoderSelection = encoder.prepare()
       videoEncoder = encoder
@@ -356,6 +410,7 @@ class RecordingService : Service() {
         AudioCaptureManager(
           context = this,
           audioSource = settings.audioSource,
+          audioFormatOption = settings.audioFormat,
           mediaProjection = mediaProjection,
           muxerManager = muxer,
           onStatusChanged = { status ->
@@ -377,10 +432,6 @@ class RecordingService : Service() {
           outputSurface = encoder.getInputSurface(),
           outputWidth = selection.alignedWidth,
           outputHeight = selection.alignedHeight,
-          cropRegion = pixelRegion,
-          targetFps = settings.videoFps.fps,
-          graphicsBackend = settings.graphicsBackend,
-          colorMode = settings.colorMode,
           onProjectionStopped = { stopRecording() },
         )
       screenCaptureManager = captureMgr
@@ -437,6 +488,7 @@ class RecordingService : Service() {
     if (RecordingSessionStore.state.value.phase != RecordingPhase.RECORDING) return
     pauseStartElapsedMs = SystemClock.elapsedRealtime()
     screenCaptureManager?.setPaused(true)
+    videoEncoder?.setPaused(true)
     audioCaptureManager?.setPaused(true)
     overlayManager?.setPaused(true)
     RecordingSessionStore.update { it.copy(phase = RecordingPhase.PAUSED) }
@@ -449,6 +501,7 @@ class RecordingService : Service() {
       pausedAccumulatedMs += (SystemClock.elapsedRealtime() - pauseStartElapsedMs).coerceAtLeast(0L)
       pauseStartElapsedMs = 0L
     }
+    videoEncoder?.setPaused(false)
     screenCaptureManager?.setPaused(false)
     audioCaptureManager?.setPaused(false)
     overlayManager?.setPaused(false)
@@ -672,10 +725,15 @@ class RecordingService : Service() {
     const val EXTRA_ORIENTATION_MODE = "extra_orientation_mode"
     const val EXTRA_AUDIO_SOURCE = "extra_audio_source"
     const val EXTRA_BITRATE = "extra_bitrate"
-    const val EXTRA_COLOR_MODE = "extra_color_mode"
-    const val EXTRA_GRAPHICS_BACKEND = "extra_graphics_backend"
+    const val EXTRA_BITRATE_MODE = "extra_bitrate_mode"
+    const val EXTRA_COLOR_DEPTH = "extra_color_depth"
     const val EXTRA_VIDEO_FPS = "extra_video_fps"
-    const val EXTRA_VIDEO_CODEC = "extra_video_codec"
+    const val EXTRA_COLOR_STANDARD = "extra_color_standard"
+    const val EXTRA_CONTAINER_MUXER = "extra_container_muxer"
+    const val EXTRA_RENDERING_MODE = "extra_rendering_mode"
+    const val EXTRA_GOP_INTERVAL = "extra_gop_interval"
+    const val EXTRA_COLOR_RANGE = "extra_color_range"
+    const val EXTRA_AUDIO_FORMAT = "extra_audio_format"
     const val EXTRA_REGION_ANIMATION = "extra_region_animation"
     const val EXTRA_REGION_LEFT = "extra_region_left"
     const val EXTRA_REGION_TOP = "extra_region_top"
@@ -696,10 +754,15 @@ class RecordingService : Service() {
         putExtra(EXTRA_ORIENTATION_MODE, settings.orientationMode.name)
         putExtra(EXTRA_AUDIO_SOURCE, settings.audioSource.name)
         putExtra(EXTRA_BITRATE, settings.videoBitrate.name)
-        putExtra(EXTRA_COLOR_MODE, settings.colorMode.name)
-        putExtra(EXTRA_GRAPHICS_BACKEND, settings.graphicsBackend.name)
+        putExtra(EXTRA_BITRATE_MODE, settings.bitrateMode.name)
+        putExtra(EXTRA_COLOR_DEPTH, settings.colorDepth.name)
         putExtra(EXTRA_VIDEO_FPS, settings.videoFps.name)
-        putExtra(EXTRA_VIDEO_CODEC, settings.videoCodec.name)
+        putExtra(EXTRA_COLOR_STANDARD, settings.colorStandard.name)
+        putExtra(EXTRA_CONTAINER_MUXER, settings.containerMuxer.name)
+        putExtra(EXTRA_RENDERING_MODE, settings.renderingMode.name)
+        putExtra(EXTRA_GOP_INTERVAL, settings.gopInterval.name)
+        putExtra(EXTRA_COLOR_RANGE, settings.colorRange.name)
+        putExtra(EXTRA_AUDIO_FORMAT, settings.audioFormat.name)
         putExtra(EXTRA_REGION_ANIMATION, settings.regionAnimation.name)
         putExtra(EXTRA_REGION_LEFT, settings.selectedRegion.left)
         putExtra(EXTRA_REGION_TOP, settings.selectedRegion.top)

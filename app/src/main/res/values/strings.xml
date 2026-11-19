@@ -44,7 +44,7 @@
     <string name="mode_fullscreen">Full Screen</string>
     <string name="mode_fullscreen_desc">Entire display capture</string>
     <string name="mode_region">Region / Area</string>
-    <string name="mode_region_desc">GPU-cropped screen rectangle</string>
+    <string name="mode_region_desc">Hardware-sized region capture</string>
 
     <string name="audio_internal">Internal Audio</string>
     <string name="audio_internal_desc">Device media &amp; app playback</string>
@@ -58,29 +58,78 @@
     <string name="bitrate_300">300 Mbps</string>
     <string name="bitrate_350">350 Mbps</string>
 
-    <string name="section_color_mode">Color Mode</string>
-    <string name="color_normal">Normal</string>
-    <string name="color_normal_desc">Standard capture &amp; color pipeline</string>
-    <string name="color_rgb8888">RGB 8:8:8:8</string>
-    <string name="color_rgb8888_desc">High-fidelity RGBA8888 &amp; BT.709</string>
+    <!-- Settings Screen (Engine & Pipeline Tuning) -->
+    <string name="settings_title">Encoding Settings</string>
+    <string name="settings_subtitle">H.265/HEVC Hardware Surface Pipeline</string>
+    <string name="settings_locked_notice">Stop active recording to change pipeline settings.</string>
 
-    <string name="section_graphics">Graphics</string>
-    <string name="graphics_vulkan">Vulkan</string>
-    <string name="graphics_vulkan_desc">Next-gen low-overhead GPU pipeline</string>
-    <string name="graphics_opengl3">OpenGL 3.0</string>
-    <string name="graphics_opengl3_desc">OpenGL ES 3.0 shader pipeline</string>
+    <string name="section_bitrate_mode">Bitrate Mode</string>
+    <string name="section_bitrate_mode_hint">Controls bitrate allocation behavior</string>
+    <string name="bitrate_mode_vbr">VBR</string>
+    <string name="bitrate_mode_vbr_desc">Balanced adaptive quality</string>
+    <string name="bitrate_mode_cq">CQ</string>
+    <string name="bitrate_mode_cq_desc">Constant target quality</string>
 
-    <string name="section_video_fps">FPS</string>
+    <string name="section_color_depth">Color Depth</string>
+    <string name="section_color_depth_hint">Selects hardware HEVC bit precision</string>
+    <string name="color_depth_8bit">8-Bit</string>
+    <string name="color_depth_8bit_desc">Standard smooth playback</string>
+    <string name="color_depth_10bit">10-Bit</string>
+    <string name="color_depth_10bit_desc">Richer gradient depth</string>
+
+    <string name="section_video_fps">Frame Rate (FPS)</string>
+    <string name="section_video_fps_hint">Sets capture smoothness per second</string>
     <string name="fps_30">30 FPS</string>
-    <string name="fps_30_desc">Balanced battery &amp; thermal</string>
+    <string name="fps_30_desc">Saves battery &amp; heat</string>
     <string name="fps_60">60 FPS</string>
-    <string name="fps_60_desc">Ultra-smooth high frame rate</string>
+    <string name="fps_60_desc">Fluid motion capture</string>
 
-    <string name="section_codec_mode">Codec Mode</string>
-    <string name="codec_h265">H265</string>
-    <string name="codec_h265_desc">HEVC high-efficiency encoding</string>
-    <string name="codec_h264">H264</string>
-    <string name="codec_h264_desc">AVC broad compatibility encoding</string>
+    <string name="section_color_standard">Color Standard</string>
+    <string name="section_color_standard_hint">Defines display color gamut mapping</string>
+    <string name="color_std_bt709">BT.709 (SDR)</string>
+    <string name="color_std_bt709_desc">Accurate standard screens</string>
+    <string name="color_std_bt2020">BT.2020 (HDR)</string>
+    <string name="color_std_bt2020_desc">Wide gamut HLG HDR</string>
+
+    <string name="section_container_muxer">Container &amp; Muxer</string>
+    <string name="section_container_muxer_hint">Controls how MP4 tracks are finalized</string>
+    <string name="muxer_hybrid_mp4">Hybrid / Fragmented MP4</string>
+    <string name="muxer_hybrid_mp4_desc">Crash-safe direct MP4</string>
+    <string name="muxer_mkv_remux">MKV to MP4 Remux</string>
+    <string name="muxer_mkv_remux_desc">Temp capture then remux</string>
+
+    <string name="section_rendering_mode">Rendering Pipeline</string>
+    <string name="section_rendering_mode_hint">Selects zero-copy surface callback mode</string>
+    <string name="rendering_async">Async Surface</string>
+    <string name="rendering_async_desc">Fast non-blocking callback</string>
+    <string name="rendering_direct">Direct Surface</string>
+    <string name="rendering_direct_desc">Synchronous zero-copy loop</string>
+
+    <string name="section_gop_interval">Keyframe Interval (GOP)</string>
+    <string name="section_gop_interval_hint">Controls seeking &amp; edit precision</string>
+    <string name="gop_1s">1 Second</string>
+    <string name="gop_1s_desc">Smaller file size</string>
+    <string name="gop_0_5s">0.5 Second</string>
+    <string name="gop_0_5s_desc">Faster video scrubbing</string>
+
+    <string name="section_color_range">Color Range</string>
+    <string name="section_color_range_hint">Sets luminance &amp; contrast span</string>
+    <string name="color_range_limited">Limited (16–235)</string>
+    <string name="color_range_limited_desc">Standard safe compatibility</string>
+    <string name="color_range_full">Full (0–255)</string>
+    <string name="color_range_full_desc">Maximum tonal contrast</string>
+
+    <string name="section_audio_format">Audio Format</string>
+    <string name="section_audio_format_hint">Selects mono 48 kHz audio encoder</string>
+    <string name="audio_fmt_aac">Mono AAC</string>
+    <string name="audio_fmt_aac_desc">48 kHz · 128 kbps</string>
+    <string name="audio_fmt_mp3">Mono MP3</string>
+    <string name="audio_fmt_mp3_desc">48 kHz · 128 kbps</string>
+
+    <string name="section_chroma_subsampling">Chroma Subsampling</string>
+    <string name="section_chroma_subsampling_hint">Active hardware surface color sampling</string>
+    <string name="chroma_420">4:2:0</string>
+    <string name="chroma_420_desc">Hardware native YUV420/P010</string>
 
     <string name="anim_show">Show</string>
     <string name="anim_hide">Hide</string>
@@ -99,6 +148,7 @@
     <string name="cd_pause_button">Pause screen recording</string>
     <string name="cd_resume_button">Resume screen recording</string>
     <string name="cd_recordings_button">Open recorded videos</string>
+    <string name="cd_settings_button">Open encoding settings</string>
     <string name="cd_back_button">Navigate back</string>
     <string name="cd_region_preview">Selected screen recording region preview</string>
 </resources>

@@ -12,6 +12,7 @@ import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
@@ -21,6 +22,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.muxer.MediaMuxerManager
+import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
 import com.example.settings.InternalRecordingConfig
 import java.nio.ByteBuffer
@@ -35,11 +37,12 @@ data class AudioCaptureStatus(
 /**
  * Captures Internal Audio (via AudioPlaybackCapture on Android 10+) or Microphone audio with
  * automatic external mic prioritization and hot-plug/unplug handling via AudioDeviceCallback,
- * encoding PCM16 into AAC-LC for MediaMuxerManager.
+ * encoding Mono 48 kHz 128 kbps PCM16 into AAC (or MP3 when an audio/mpeg encoder is available).
  */
 class AudioCaptureManager(
   private val context: Context,
   private val audioSource: AudioSourceOption,
+  private val audioFormatOption: AudioFormatOption = AudioFormatOption.MONO_AAC,
   private val mediaProjection: MediaProjection?,
   private val muxerManager: MediaMuxerManager,
   private val onStatusChanged: (AudioCaptureStatus) -> Unit = {},
@@ -54,8 +57,8 @@ class AudioCaptureManager(
   private var drainThread: Thread? = null
   private var deviceCallback: AudioDeviceCallback? = null
 
-  private var sampleRate = 48_000
-  private var channelCount = 2
+  private var sampleRate = InternalRecordingConfig.AUDIO_SAMPLE_RATE_HZ
+  private var captureChannelCount = 1
   private var pauseStartNs = 0L
   private var pausedAccumulatedNs = 0L
   private var startTimeNs = 0L
@@ -87,18 +90,24 @@ class AudioCaptureManager(
     val (record, bufferSize, initialLabel) = recordSetup
     audioRecord = record
 
+    var formatFallbackWarning: String? = null
     val encoder =
       try {
-        createAacEncoder(sampleRate, channelCount)
+        val (codec, usedFallback) = createAudioEncoder(sampleRate)
+        if (usedFallback) {
+          formatFallbackWarning =
+            "MP3 encoder unavailable on device; recorded Mono AAC (48 kHz, 128 kbps)."
+        }
+        codec
       } catch (e: Exception) {
-        Log.e(TAG, "Failed to configure AAC audio encoder", e)
+        Log.e(TAG, "Failed to configure audio encoder", e)
         runCatching { record.release() }
         audioRecord = null
         muxerManager.disableAudioTrack()
         return AudioCaptureStatus(
           isCapturing = false,
           activeDeviceLabel = "Audio encoder unavailable",
-          warningMessage = "AAC encoder unavailable; recording video only.",
+          warningMessage = "Audio encoder unavailable; recording video only.",
         ).also(onStatusChanged)
       }
 
@@ -125,7 +134,11 @@ class AudioCaptureManager(
           start()
         }
 
-      AudioCaptureStatus(isCapturing = true, activeDeviceLabel = initialLabel).also(onStatusChanged)
+      AudioCaptureStatus(
+        isCapturing = true,
+        activeDeviceLabel = initialLabel,
+        warningMessage = formatFallbackWarning,
+      ).also(onStatusChanged)
     } catch (e: Exception) {
       Log.e(TAG, "Audio capture start failed", e)
       stopAndRelease()
@@ -185,67 +198,68 @@ class AudioCaptureManager(
   }
 
   private fun createAudioRecord(): Triple<AudioRecord, Int, String>? {
-    val candidateRates = intArrayOf(48_000, 44_100)
-    val channelMask =
+    val candidateRates = intArrayOf(InternalRecordingConfig.AUDIO_SAMPLE_RATE_HZ, 44_100)
+    val channelMasks =
       if (audioSource == AudioSourceOption.INTERNAL) {
-        channelCount = 2
-        AudioFormat.CHANNEL_IN_STEREO
+        intArrayOf(AudioFormat.CHANNEL_IN_MONO, AudioFormat.CHANNEL_IN_STEREO)
       } else {
-        channelCount = 1
-        AudioFormat.CHANNEL_IN_MONO
+        intArrayOf(AudioFormat.CHANNEL_IN_MONO)
       }
 
     for (rate in candidateRates) {
-      val minBuf = AudioRecord.getMinBufferSize(rate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-      if (minBuf <= 0) continue
-      val bufferSize = (minBuf * 2).coerceAtLeast(4096)
+      for (channelMask in channelMasks) {
+        val minBuf = AudioRecord.getMinBufferSize(rate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+        if (minBuf <= 0) continue
+        val bufferSize = (minBuf * 2).coerceAtLeast(4096)
 
-      try {
-        val audioFormat =
-          AudioFormat.Builder()
-            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-            .setSampleRate(rate)
-            .setChannelMask(channelMask)
-            .build()
+        try {
+          val audioFormat =
+            AudioFormat.Builder()
+              .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+              .setSampleRate(rate)
+              .setChannelMask(channelMask)
+              .build()
 
-        val record =
-          if (audioSource == AudioSourceOption.INTERNAL) {
-            val projection = mediaProjection ?: return null
-            val captureConfig =
-              AudioPlaybackCaptureConfiguration.Builder(projection)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+          val record =
+            if (audioSource == AudioSourceOption.INTERNAL) {
+              val projection = mediaProjection ?: return null
+              val captureConfig =
+                AudioPlaybackCaptureConfiguration.Builder(projection)
+                  .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                  .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                  .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                  .build()
+              AudioRecord.Builder()
+                .setAudioFormat(audioFormat)
+                .setBufferSizeInBytes(bufferSize)
+                .setAudioPlaybackCaptureConfig(captureConfig)
                 .build()
-            AudioRecord.Builder()
-              .setAudioFormat(audioFormat)
-              .setBufferSizeInBytes(bufferSize)
-              .setAudioPlaybackCaptureConfig(captureConfig)
-              .build()
-          } else {
-            AudioRecord.Builder()
-              .setAudioSource(MediaRecorder.AudioSource.MIC)
-              .setAudioFormat(audioFormat)
-              .setBufferSizeInBytes(bufferSize)
-              .build()
-          }
-
-        if (record.state == AudioRecord.STATE_INITIALIZED) {
-          sampleRate = rate
-          val label =
-            if (audioSource == AudioSourceOption.MICROPHONE) {
-              applyBestMicrophoneDevice(record)
             } else {
-              "Internal Audio"
+              AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.MIC)
+                .setAudioFormat(audioFormat)
+                .setBufferSizeInBytes(bufferSize)
+                .build()
             }
-          return Triple(record, bufferSize, label)
+
+          if (record.state == AudioRecord.STATE_INITIALIZED) {
+            sampleRate = rate
+            captureChannelCount = if (channelMask == AudioFormat.CHANNEL_IN_STEREO) 2 else 1
+            val label =
+              if (audioSource == AudioSourceOption.MICROPHONE) {
+                applyBestMicrophoneDevice(record)
+              } else {
+                "Internal Audio"
+              }
+            return Triple(record, bufferSize, label)
+          }
+          record.release()
+        } catch (e: SecurityException) {
+          Log.e(TAG, "Missing RECORD_AUDIO permission", e)
+          return null
+        } catch (e: Exception) {
+          Log.w(TAG, "AudioRecord init failed at $rate Hz, mask=$channelMask", e)
         }
-        record.release()
-      } catch (e: SecurityException) {
-        Log.e(TAG, "Missing RECORD_AUDIO permission", e)
-        return null
-      } catch (e: Exception) {
-        Log.w(TAG, "AudioRecord init failed at $rate Hz", e)
       }
     }
     return null
@@ -290,18 +304,48 @@ class AudioCaptureManager(
     deviceCallback = null
   }
 
-  private fun createAacEncoder(rate: Int, channels: Int): MediaCodec {
-    val format =
-      MediaFormat.createAudioFormat(InternalRecordingConfig.AUDIO_MIME_TYPE, rate, channels).apply {
+  private fun createAudioEncoder(rate: Int): Pair<MediaCodec, Boolean> {
+    val monoChannels = InternalRecordingConfig.AUDIO_CHANNEL_COUNT
+    val bitrateBps = InternalRecordingConfig.AUDIO_BITRATE_BPS
+
+    if (audioFormatOption == AudioFormatOption.MONO_MP3 && hasEncoderForMime(MediaFormat.MIMETYPE_AUDIO_MPEG)) {
+      val mp3Attempt =
+        runCatching {
+          val mp3Format =
+            MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_MPEG, rate, monoChannels).apply {
+              setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
+              setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16_384)
+            }
+          MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_MPEG).apply {
+            configure(mp3Format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+          }
+        }
+      if (mp3Attempt.isSuccess) {
+        return mp3Attempt.getOrThrow() to false
+      }
+      Log.w(TAG, "MP3 encoder config failed; falling back to Mono AAC", mp3Attempt.exceptionOrNull())
+    }
+
+    val fallbackUsed = audioFormatOption == AudioFormatOption.MONO_MP3
+    val aacFormat =
+      MediaFormat.createAudioFormat(InternalRecordingConfig.AUDIO_MIME_TYPE, rate, monoChannels).apply {
         setInteger(
           MediaFormat.KEY_AAC_PROFILE,
           MediaCodecInfo.CodecProfileLevel.AACObjectLC,
         )
-        setInteger(MediaFormat.KEY_BIT_RATE, InternalRecordingConfig.AUDIO_BITRATE_BPS)
+        setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
         setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16_384)
       }
-    return MediaCodec.createEncoderByType(InternalRecordingConfig.AUDIO_MIME_TYPE).apply {
-      configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+    val codec =
+      MediaCodec.createEncoderByType(InternalRecordingConfig.AUDIO_MIME_TYPE).apply {
+        configure(aacFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      }
+    return codec to fallbackUsed
+  }
+
+  private fun hasEncoderForMime(mimeType: String): Boolean {
+    return MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.any { info ->
+      info.isEncoder && info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }
     }
   }
 
@@ -330,13 +374,13 @@ class AudioCaptureManager(
         )
         break
       }
-      if (bytesRead == 0) {
+      if (bytesRead == 0 || isPaused.get()) {
         continue
       }
 
-      if (isPaused.get()) {
-        continue
-      }
+      val monoPayloadSize =
+        if (captureChannelCount == 2) downmixStereoToMonoInPlace(pcmBuffer, bytesRead)
+        else bytesRead
 
       val inputIndex =
         try {
@@ -348,7 +392,7 @@ class AudioCaptureManager(
       if (inputIndex >= 0) {
         val inputBuffer: ByteBuffer = encoder.getInputBuffer(inputIndex) ?: continue
         inputBuffer.clear()
-        val toCopy = bytesRead.coerceAtMost(inputBuffer.remaining())
+        val toCopy = monoPayloadSize.coerceAtMost(inputBuffer.remaining())
         inputBuffer.put(pcmBuffer, 0, toCopy)
 
         val nowNs = SystemClock.elapsedRealtimeNanos()
@@ -372,6 +416,23 @@ class AudioCaptureManager(
         encoder.queueInputBuffer(eosIndex, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
       }
     }
+  }
+
+  private fun downmixStereoToMonoInPlace(buffer: ByteArray, bytesRead: Int): Int {
+    val frameCount = bytesRead / 4
+    var outOffset = 0
+    var inOffset = 0
+    for (i in 0 until frameCount) {
+      val left = ((buffer[inOffset + 1].toInt() shl 8) or (buffer[inOffset].toInt() and 0xFF)).toShort()
+      val right =
+        ((buffer[inOffset + 3].toInt() shl 8) or (buffer[inOffset + 2].toInt() and 0xFF)).toShort()
+      val mono = ((left.toInt() + right.toInt()) / 2).toShort()
+      buffer[outOffset] = (mono.toInt() and 0xFF).toByte()
+      buffer[outOffset + 1] = ((mono.toInt() shr 8) and 0xFF).toByte()
+      inOffset += 4
+      outOffset += 2
+    }
+    return outOffset
   }
 
   private fun drainEncoderLoop() {

@@ -3,17 +3,22 @@ package com.example
 import android.media.MediaFormat
 import com.example.encoder.VideoEncoder
 import com.example.region.RegionSelectionManager
+import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
-import com.example.settings.ColorMode
-import com.example.settings.GraphicsBackend
+import com.example.settings.BitrateModeOption
+import com.example.settings.ColorDepthOption
+import com.example.settings.ColorRangeOption
+import com.example.settings.ColorStandardOption
+import com.example.settings.ContainerMuxerOption
+import com.example.settings.GopIntervalOption
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
+import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
-import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -22,35 +27,72 @@ import org.junit.Test
 class RecorderCoreUnitTest {
 
   @Test
-  fun `default settings and fixed internal H265 30fps match specification`() {
+  fun `default settings and hardcoded H265 HEVC hardware surface config match specification`() {
     val defaults = RecordingSettings()
     assertEquals(RecordingMode.FULL_SCREEN, defaults.recordingMode)
     assertEquals(OrientationMode.PORTRAIT, defaults.orientationMode)
     assertEquals(listOf(OrientationMode.PORTRAIT, OrientationMode.LANDSCAPE), OrientationMode.entries)
     assertEquals(MediaFormat.MIMETYPE_VIDEO_HEVC, InternalRecordingConfig.VIDEO_MIME_TYPE)
-    assertEquals(30, InternalRecordingConfig.TARGET_FPS)
+    assertEquals(48_000, InternalRecordingConfig.AUDIO_SAMPLE_RATE_HZ)
+    assertEquals(128_000, InternalRecordingConfig.AUDIO_BITRATE_BPS)
+    assertEquals(1, InternalRecordingConfig.AUDIO_CHANNEL_COUNT)
+    assertEquals("4:2:0", InternalRecordingConfig.CHROMA_SUBSAMPLING_LABEL)
+
     assertEquals(AudioSourceOption.INTERNAL, defaults.audioSource)
     assertEquals(VideoBitrateOption.MBPS_150, defaults.videoBitrate)
-    assertEquals(ColorMode.NORMAL, defaults.colorMode)
-    assertEquals(listOf(ColorMode.NORMAL, ColorMode.RGB_8888), ColorMode.entries)
-    assertEquals(GraphicsBackend.VULKAN, defaults.graphicsBackend)
-    assertEquals(listOf(GraphicsBackend.VULKAN, GraphicsBackend.OPENGL_ES_3), GraphicsBackend.entries)
+    assertEquals(RegionAnimationOption.SHOW, defaults.regionAnimation)
+
+    // Verify all 9 advanced settings default to option A
+    assertEquals(BitrateModeOption.VBR, defaults.bitrateMode)
+    assertEquals(listOf(BitrateModeOption.VBR, BitrateModeOption.CQ), BitrateModeOption.entries)
+
+    assertEquals(ColorDepthOption.BIT_8, defaults.colorDepth)
+    assertEquals(listOf(8, 10), ColorDepthOption.entries.map { it.bitDepth })
+
     assertEquals(VideoFpsOption.FPS_30, defaults.videoFps)
-    assertEquals(listOf(VideoFpsOption.FPS_30, VideoFpsOption.FPS_60), VideoFpsOption.entries)
     assertEquals(listOf(30, 60), VideoFpsOption.entries.map { it.fps })
-    assertEquals(VideoCodecOption.H265, defaults.videoCodec)
-    assertEquals(listOf(VideoCodecOption.H265, VideoCodecOption.H264), VideoCodecOption.entries)
-    assertEquals(MediaFormat.MIMETYPE_VIDEO_HEVC, VideoCodecOption.H265.mimeType)
-    assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, VideoCodecOption.H264.mimeType)
-    val avcSelection =
+
+    assertEquals(ColorStandardOption.BT_709, defaults.colorStandard)
+    assertEquals(
+      listOf(ColorStandardOption.BT_709, ColorStandardOption.BT_2020),
+      ColorStandardOption.entries,
+    )
+
+    assertEquals(ContainerMuxerOption.HYBRID_MP4, defaults.containerMuxer)
+    assertEquals(
+      listOf(ContainerMuxerOption.HYBRID_MP4, ContainerMuxerOption.MKV_REMUX_MP4),
+      ContainerMuxerOption.entries,
+    )
+
+    assertEquals(RenderingModeOption.ASYNC_SURFACE, defaults.renderingMode)
+    assertEquals(
+      listOf(RenderingModeOption.ASYNC_SURFACE, RenderingModeOption.DIRECT_SURFACE),
+      RenderingModeOption.entries,
+    )
+
+    assertEquals(GopIntervalOption.SEC_1, defaults.gopInterval)
+    assertEquals(listOf(1.0f, 0.5f), GopIntervalOption.entries.map { it.secondsFloat })
+
+    assertEquals(ColorRangeOption.LIMITED, defaults.colorRange)
+    assertEquals(
+      listOf(MediaFormat.COLOR_RANGE_LIMITED, MediaFormat.COLOR_RANGE_FULL),
+      ColorRangeOption.entries.map { it.mediaFormatRange },
+    )
+
+    assertEquals(AudioFormatOption.MONO_AAC, defaults.audioFormat)
+    assertEquals(
+      listOf(MediaFormat.MIMETYPE_AUDIO_AAC, MediaFormat.MIMETYPE_AUDIO_MPEG),
+      AudioFormatOption.entries.map { it.mimeType },
+    )
+
+    val hevcSelection =
       VideoEncoder.selectBestEncoder(
         requestedWidth = 1080,
         requestedHeight = 2400,
         availableCodecs = emptyList(),
-        codecOption = VideoCodecOption.H264,
       )
-    assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, avcSelection.mimeType)
-    assertEquals("default-avc", avcSelection.codecName)
+    assertEquals("default-hevc", hevcSelection.codecName)
+
     assertEquals(
       listOf(
         VideoBitrateOption.MBPS_100,
@@ -62,11 +104,6 @@ class RecorderCoreUnitTest {
       ),
       VideoBitrateOption.entries,
     )
-    assertEquals(
-      listOf(100_000_000, 150_000_000, 200_000_000, 250_000_000, 300_000_000, 350_000_000),
-      VideoBitrateOption.entries.map { it.targetBitsPerSecond },
-    )
-    assertEquals(RegionAnimationOption.SHOW, defaults.regionAnimation)
   }
 
   @Test
@@ -102,7 +139,7 @@ class RecorderCoreUnitTest {
   }
 
   @Test
-  fun `pixel region produces even H264 dimensions within screen bounds`() {
+  fun `pixel region produces even HEVC dimensions within screen bounds`() {
     val region = NormalizedRegion(left = 0.133f, top = 0.217f, right = 0.871f, bottom = 0.779f)
     val pixel = RegionSelectionManager.toPixelRegion(region, screenWidth = 1081, screenHeight = 2401)
 

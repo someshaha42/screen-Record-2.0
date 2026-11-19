@@ -39,10 +39,12 @@ import com.example.ui.RecorderViewModel
 import com.example.ui.components.RegionSelectorOverlay
 import com.example.ui.screens.MainScreen
 import com.example.ui.screens.RecordingsScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.FrameCutTheme
 
 private const val ROUTE_MAIN = "main"
 private const val ROUTE_RECORDINGS = "recordings"
+private const val ROUTE_SETTINGS = "settings"
 
 class MainActivity : ComponentActivity() {
 
@@ -170,18 +172,35 @@ private fun FrameCutApp(
                 navController.navigate(ROUTE_RECORDINGS) { launchSingleTop = true }
               }
             },
+          onOpenSettings =
+            remember(navController) {
+              { navController.navigate(ROUTE_SETTINGS) { launchSingleTop = true } }
+            },
           onSelectMode = remember(viewModel) { viewModel::setRecordingMode },
           onSelectOrientationMode = remember(viewModel) { viewModel::setOrientationMode },
           onSelectAudioSource = remember(viewModel) { viewModel::setAudioSource },
           onSelectBitrate = remember(viewModel) { viewModel::setVideoBitrate },
-          onSelectColorMode = remember(viewModel) { viewModel::setColorMode },
-          onSelectGraphicsBackend = remember(viewModel) { viewModel::setGraphicsBackend },
-          onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
-          onSelectVideoCodec = remember(viewModel) { viewModel::setVideoCodec },
           onSelectRegionAnimation = remember(viewModel) { viewModel::setRegionAnimation },
           onEditRegion = remember(viewModel) { viewModel::openRegionEditor },
           onRequestOverlayPermission = onOpenOverlaySettings,
           onDismissMessages = remember(viewModel) { viewModel::clearMessages },
+        )
+      }
+
+      composable(ROUTE_SETTINGS) {
+        SettingsScreen(
+          settings = uiState.settings,
+          isIdle = uiState.session.phase == RecordingPhase.IDLE,
+          onBack = { navController.popBackStack() },
+          onSelectBitrateMode = remember(viewModel) { viewModel::setBitrateMode },
+          onSelectColorDepth = remember(viewModel) { viewModel::setColorDepth },
+          onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
+          onSelectColorStandard = remember(viewModel) { viewModel::setColorStandard },
+          onSelectContainerMuxer = remember(viewModel) { viewModel::setContainerMuxer },
+          onSelectRenderingMode = remember(viewModel) { viewModel::setRenderingMode },
+          onSelectGopInterval = remember(viewModel) { viewModel::setGopInterval },
+          onSelectColorRange = remember(viewModel) { viewModel::setColorRange },
+          onSelectAudioFormat = remember(viewModel) { viewModel::setAudioFormat },
         )
       }
 

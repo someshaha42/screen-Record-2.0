@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaCodec
+import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
@@ -11,6 +12,8 @@ import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
+import com.example.settings.ContainerMuxerOption
+import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -19,17 +22,19 @@ import java.util.Locale
 data class MuxerOutput(val uri: Uri, val displayName: String, val filePath: String? = null)
 
 /**
- * Thread-safe MediaMuxer coordinator that synchronizes video and optional audio tracks, writes
- * monotonically ordered MP4 samples, and publishes completed files via MediaStore (API 29+) or
- * app Movies storage.
+ * Thread-safe MediaMuxer coordinator supporting direct progressive MP4 output (Hybrid MP4) or
+ * temporary staging capture with clean MediaExtractor -> MediaMuxer final MP4 remuxing, publishing
+ * completed files via MediaStore Movies/FrameCut.
  */
 class MediaMuxerManager(
   private val context: Context,
   private val expectAudioTrackInitial: Boolean,
+  private val containerMuxer: ContainerMuxerOption = ContainerMuxerOption.HYBRID_MP4,
 ) {
   private val lock = Any()
   private var mediaMuxer: MediaMuxer? = null
   private var parcelFd: ParcelFileDescriptor? = null
+  private var stagingFile: File? = null
   private var outputUri: Uri? = null
   private var displayName: String = ""
 
@@ -69,7 +74,14 @@ class MediaMuxerManager(
           }
       outputUri = uri
       parcelFd = pfd
-      mediaMuxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+      if (containerMuxer == ContainerMuxerOption.MKV_REMUX_MP4) {
+        val tempFile = File(context.cacheDir, "framecut_staging_$timestamp.mp4")
+        stagingFile = tempFile
+        mediaMuxer = MediaMuxer(tempFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+      } else {
+        mediaMuxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+      }
       return MuxerOutput(uri = uri, displayName = displayName)
     }
   }
@@ -134,7 +146,10 @@ class MediaMuxerManager(
       muxer.start()
       muxerStarted = true
       (lock as Object).notifyAll()
-      Log.d(TAG, "MediaMuxer started (videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex)")
+      Log.d(
+        TAG,
+        "MediaMuxer started (mode=${containerMuxer.label}, videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex)",
+      )
     }
   }
 
@@ -195,9 +210,22 @@ class MediaMuxerManager(
       } finally {
         runCatching { mediaMuxer?.release() }
         mediaMuxer = null
-        runCatching { parcelFd?.close() }
-        parcelFd = null
       }
+
+      if (validOutput && containerMuxer == ContainerMuxerOption.MKV_REMUX_MP4) {
+        val temp = stagingFile
+        val pfd = parcelFd
+        if (temp != null && temp.exists() && pfd != null) {
+          validOutput = remuxStagingToMp4(temp, pfd)
+        } else {
+          validOutput = false
+        }
+      }
+
+      runCatching { stagingFile?.delete() }
+      stagingFile = null
+      runCatching { parcelFd?.close() }
+      parcelFd = null
 
       val uri = outputUri
       if (uri != null) {
@@ -214,6 +242,53 @@ class MediaMuxerManager(
       } else {
         null
       }
+    }
+  }
+
+  private fun remuxStagingToMp4(staging: File, destPfd: ParcelFileDescriptor): Boolean {
+    val extractor = MediaExtractor()
+    var destMuxer: MediaMuxer? = null
+    return try {
+      extractor.setDataSource(staging.absolutePath)
+      destMuxer = MediaMuxer(destPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+      val trackMap = HashMap<Int, Int>()
+      var maxInputSize = 256 * 1024
+      for (i in 0 until extractor.trackCount) {
+        val format = extractor.getTrackFormat(i)
+        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+          maxInputSize = maxOf(maxInputSize, format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE))
+        }
+        val destTrack = destMuxer.addTrack(format)
+        trackMap[i] = destTrack
+        extractor.selectTrack(i)
+      }
+
+      destMuxer.start()
+      val buffer = ByteBuffer.allocateDirect(maxInputSize)
+      val info = MediaCodec.BufferInfo()
+
+      while (true) {
+        buffer.clear()
+        val sampleSize = extractor.readSampleData(buffer, 0)
+        if (sampleSize < 0) break
+        val trackIdx = extractor.sampleTrackIndex
+        val destTrack = trackMap[trackIdx]
+        if (destTrack != null) {
+          info.set(0, sampleSize, extractor.sampleTime, extractor.sampleFlags)
+          destMuxer.writeSampleData(destTrack, buffer, info)
+        }
+        extractor.advance()
+      }
+
+      destMuxer.stop()
+      true
+    } catch (e: Exception) {
+      Log.e(TAG, "Remux pass failed", e)
+      false
+    } finally {
+      runCatching { destMuxer?.release() }
+      runCatching { extractor.release() }
     }
   }
 

@@ -16,17 +16,22 @@ import com.example.service.RecordingPhase
 import com.example.service.RecordingService
 import com.example.service.RecordingSessionState
 import com.example.service.RecordingSessionStore
+import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
-import com.example.settings.ColorMode
-import com.example.settings.GraphicsBackend
+import com.example.settings.BitrateModeOption
+import com.example.settings.ColorDepthOption
+import com.example.settings.ColorRangeOption
+import com.example.settings.ColorStandardOption
+import com.example.settings.ContainerMuxerOption
+import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RecordingSettingsRepository
 import com.example.settings.RegionAnimationOption
+import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
-import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -159,20 +164,20 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setVideoBitrate(bitrate) }
   }
 
-  @Volatile private var latestColorModeOverride: ColorMode? = null
+  @Volatile private var latestBitrateModeOverride: BitrateModeOption? = null
 
-  fun setColorMode(mode: ColorMode) {
+  fun setBitrateMode(mode: BitrateModeOption) {
     if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestColorModeOverride = mode
-    viewModelScope.launch { settingsRepo.setColorMode(mode) }
+    latestBitrateModeOverride = mode
+    viewModelScope.launch { settingsRepo.setBitrateMode(mode) }
   }
 
-  @Volatile private var latestGraphicsBackendOverride: GraphicsBackend? = null
+  @Volatile private var latestColorDepthOverride: ColorDepthOption? = null
 
-  fun setGraphicsBackend(backend: GraphicsBackend) {
+  fun setColorDepth(depth: ColorDepthOption) {
     if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestGraphicsBackendOverride = backend
-    viewModelScope.launch { settingsRepo.setGraphicsBackend(backend) }
+    latestColorDepthOverride = depth
+    viewModelScope.launch { settingsRepo.setColorDepth(depth) }
   }
 
   @Volatile private var latestVideoFpsOverride: VideoFpsOption? = null
@@ -183,12 +188,52 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setVideoFps(fps) }
   }
 
-  @Volatile private var latestVideoCodecOverride: VideoCodecOption? = null
+  @Volatile private var latestColorStandardOverride: ColorStandardOption? = null
 
-  fun setVideoCodec(codec: VideoCodecOption) {
+  fun setColorStandard(standard: ColorStandardOption) {
     if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestVideoCodecOverride = codec
-    viewModelScope.launch { settingsRepo.setVideoCodec(codec) }
+    latestColorStandardOverride = standard
+    viewModelScope.launch { settingsRepo.setColorStandard(standard) }
+  }
+
+  @Volatile private var latestContainerMuxerOverride: ContainerMuxerOption? = null
+
+  fun setContainerMuxer(muxer: ContainerMuxerOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestContainerMuxerOverride = muxer
+    viewModelScope.launch { settingsRepo.setContainerMuxer(muxer) }
+  }
+
+  @Volatile private var latestRenderingModeOverride: RenderingModeOption? = null
+
+  fun setRenderingMode(mode: RenderingModeOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestRenderingModeOverride = mode
+    viewModelScope.launch { settingsRepo.setRenderingMode(mode) }
+  }
+
+  @Volatile private var latestGopIntervalOverride: GopIntervalOption? = null
+
+  fun setGopInterval(interval: GopIntervalOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestGopIntervalOverride = interval
+    viewModelScope.launch { settingsRepo.setGopInterval(interval) }
+  }
+
+  @Volatile private var latestColorRangeOverride: ColorRangeOption? = null
+
+  fun setColorRange(range: ColorRangeOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestColorRangeOverride = range
+    viewModelScope.launch { settingsRepo.setColorRange(range) }
+  }
+
+  @Volatile private var latestAudioFormatOverride: AudioFormatOption? = null
+
+  fun setAudioFormat(format: AudioFormatOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestAudioFormatOverride = format
+    viewModelScope.launch { settingsRepo.setAudioFormat(format) }
   }
 
   @Volatile private var latestRegionAnimationOverride: RegionAnimationOption? = null
@@ -227,20 +272,19 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
 
   fun startRecording(resultCode: Int, resultData: Intent) {
     val baseSettings = uiState.value.settings
-    val effectiveOrientation = latestOrientationModeOverride ?: baseSettings.orientationMode
-    val effectiveColorMode = latestColorModeOverride ?: baseSettings.colorMode
-    val effectiveGraphics = latestGraphicsBackendOverride ?: baseSettings.graphicsBackend
-    val effectiveFps = latestVideoFpsOverride ?: baseSettings.videoFps
-    val effectiveCodec = latestVideoCodecOverride ?: baseSettings.videoCodec
-    val effectiveAnimation = latestRegionAnimationOverride ?: baseSettings.regionAnimation
     val currentSettings =
       baseSettings.copy(
-        orientationMode = effectiveOrientation,
-        colorMode = effectiveColorMode,
-        graphicsBackend = effectiveGraphics,
-        videoFps = effectiveFps,
-        videoCodec = effectiveCodec,
-        regionAnimation = effectiveAnimation,
+        orientationMode = latestOrientationModeOverride ?: baseSettings.orientationMode,
+        bitrateMode = latestBitrateModeOverride ?: baseSettings.bitrateMode,
+        colorDepth = latestColorDepthOverride ?: baseSettings.colorDepth,
+        videoFps = latestVideoFpsOverride ?: baseSettings.videoFps,
+        colorStandard = latestColorStandardOverride ?: baseSettings.colorStandard,
+        containerMuxer = latestContainerMuxerOverride ?: baseSettings.containerMuxer,
+        renderingMode = latestRenderingModeOverride ?: baseSettings.renderingMode,
+        gopInterval = latestGopIntervalOverride ?: baseSettings.gopInterval,
+        colorRange = latestColorRangeOverride ?: baseSettings.colorRange,
+        audioFormat = latestAudioFormatOverride ?: baseSettings.audioFormat,
+        regionAnimation = latestRegionAnimationOverride ?: baseSettings.regionAnimation,
       )
     val intent =
       RecordingService.startRecordingIntent(

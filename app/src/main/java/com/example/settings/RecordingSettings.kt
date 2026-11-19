@@ -45,9 +45,14 @@ enum class RegionAnimationOption {
   HIDE,
 }
 
-enum class GraphicsBackend(val label: String) {
-  VULKAN("Vulkan"),
-  OPENGL_ES_3("OpenGL 3.0"),
+enum class BitrateModeOption(val label: String) {
+  VBR("VBR"),
+  CQ("CQ"),
+}
+
+enum class ColorDepthOption(val bitDepth: Int, val label: String) {
+  BIT_8(8, "8-Bit"),
+  BIT_10(10, "10-Bit"),
 }
 
 enum class VideoFpsOption(val fps: Int, val label: String) {
@@ -55,14 +60,34 @@ enum class VideoFpsOption(val fps: Int, val label: String) {
   FPS_60(60, "60 FPS"),
 }
 
-enum class VideoCodecOption(val mimeType: String, val label: String) {
-  H265(MediaFormat.MIMETYPE_VIDEO_HEVC, "H265"),
-  H264(MediaFormat.MIMETYPE_VIDEO_AVC, "H264"),
+enum class ColorStandardOption(val label: String) {
+  BT_709("BT.709 (SDR)"),
+  BT_2020("BT.2020 (HDR)"),
 }
 
-enum class ColorMode(val label: String) {
-  NORMAL("Normal"),
-  RGB_8888("RGB 8:8:8:8"),
+enum class ContainerMuxerOption(val label: String) {
+  HYBRID_MP4("Hybrid / Fragmented MP4"),
+  MKV_REMUX_MP4("MKV to MP4 Remux"),
+}
+
+enum class RenderingModeOption(val label: String) {
+  ASYNC_SURFACE("Asynchronous Rendering"),
+  DIRECT_SURFACE("Direct Rendering"),
+}
+
+enum class GopIntervalOption(val secondsFloat: Float, val label: String) {
+  SEC_1(1.0f, "1 Second"),
+  SEC_0_5(0.5f, "0.5 Second"),
+}
+
+enum class ColorRangeOption(val mediaFormatRange: Int, val label: String) {
+  LIMITED(MediaFormat.COLOR_RANGE_LIMITED, "Limited Range"),
+  FULL(MediaFormat.COLOR_RANGE_FULL, "Full Range"),
+}
+
+enum class AudioFormatOption(val mimeType: String, val label: String) {
+  MONO_AAC(MediaFormat.MIMETYPE_AUDIO_AAC, "Mono AAC"),
+  MONO_MP3(MediaFormat.MIMETYPE_AUDIO_MPEG, "Mono MP3"),
 }
 
 /**
@@ -92,17 +117,23 @@ data class RecordingSettings(
   val orientationMode: OrientationMode = OrientationMode.PORTRAIT,
   val audioSource: AudioSourceOption = AudioSourceOption.INTERNAL,
   val videoBitrate: VideoBitrateOption = VideoBitrateOption.MBPS_150,
-  val colorMode: ColorMode = ColorMode.NORMAL,
-  val graphicsBackend: GraphicsBackend = GraphicsBackend.VULKAN,
-  val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
-  val videoCodec: VideoCodecOption = VideoCodecOption.H265,
   val regionAnimation: RegionAnimationOption = RegionAnimationOption.SHOW,
   val selectedRegion: NormalizedRegion = NormalizedRegion(),
+  // Advanced pipeline settings (configured inside the dedicated Settings screen)
+  val bitrateMode: BitrateModeOption = BitrateModeOption.VBR,
+  val colorDepth: ColorDepthOption = ColorDepthOption.BIT_8,
+  val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
+  val colorStandard: ColorStandardOption = ColorStandardOption.BT_709,
+  val containerMuxer: ContainerMuxerOption = ContainerMuxerOption.HYBRID_MP4,
+  val renderingMode: RenderingModeOption = RenderingModeOption.ASYNC_SURFACE,
+  val gopInterval: GopIntervalOption = GopIntervalOption.SEC_1,
+  val colorRange: ColorRangeOption = ColorRangeOption.LIMITED,
+  val audioFormat: AudioFormatOption = AudioFormatOption.MONO_AAC,
 )
 
 /**
- * Fixed internal recording parameters. These are fixed in code and intentionally not exposed for
- * user modification in the UI.
+ * Hardcoded H.265/HEVC and audio baseline parameters. Video codec is strictly HEVC using
+ * hardware COLOR_FormatSurface with native GPU YUV_420_888 (8-bit) or P010 (10-bit).
  */
 object InternalRecordingConfig {
   const val TARGET_FPS = 30
@@ -113,16 +144,15 @@ object InternalRecordingConfig {
   const val MEDIATEK_HEVC_ENCODER = "c2.mtk.hevc.encoder"
   const val MEDIATEK_LEGACY_HEVC_ENCODER = "OMX.MTK.VIDEO.ENCODER.HEVC"
 
-  const val SNAPDRAGON_AVC_ENCODER = "c2.qti.avc.encoder"
-  const val SNAPDRAGON_LEGACY_AVC_ENCODER = "OMX.qcom.video.encoder.avc"
-  const val MEDIATEK_AVC_ENCODER = "c2.mtk.avc.encoder"
-  const val MEDIATEK_LEGACY_AVC_ENCODER = "OMX.MTK.VIDEO.ENCODER.AVC"
-
   const val SURFACE_COLOR_FORMAT = MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
   const val I_FRAME_INTERVAL_SECONDS = 1
 
   const val AUDIO_MIME_TYPE = MediaFormat.MIMETYPE_AUDIO_AAC
-  const val AUDIO_BITRATE_BPS = 192_000
+  const val AUDIO_SAMPLE_RATE_HZ = 48_000
+  const val AUDIO_BITRATE_BPS = 128_000
+  const val AUDIO_CHANNEL_COUNT = 1
+
+  const val CHROMA_SUBSAMPLING_LABEL = "4:2:0"
 }
 
 class RecordingSettingsRepository(private val context: Context) {
@@ -132,15 +162,21 @@ class RecordingSettingsRepository(private val context: Context) {
     val ORIENTATION_MODE = stringPreferencesKey("orientation_mode")
     val AUDIO_SOURCE = stringPreferencesKey("audio_source")
     val VIDEO_BITRATE = stringPreferencesKey("video_bitrate")
-    val COLOR_MODE = stringPreferencesKey("color_mode")
-    val GRAPHICS_BACKEND = stringPreferencesKey("graphics_backend")
-    val VIDEO_FPS = stringPreferencesKey("video_fps")
-    val VIDEO_CODEC = stringPreferencesKey("video_codec")
     val REGION_ANIMATION = stringPreferencesKey("region_animation")
     val REGION_LEFT = floatPreferencesKey("region_left")
     val REGION_TOP = floatPreferencesKey("region_top")
     val REGION_RIGHT = floatPreferencesKey("region_right")
     val REGION_BOTTOM = floatPreferencesKey("region_bottom")
+
+    val BITRATE_MODE = stringPreferencesKey("bitrate_mode")
+    val COLOR_DEPTH = stringPreferencesKey("color_depth")
+    val VIDEO_FPS = stringPreferencesKey("video_fps")
+    val COLOR_STANDARD = stringPreferencesKey("color_standard")
+    val CONTAINER_MUXER = stringPreferencesKey("container_muxer")
+    val RENDERING_MODE = stringPreferencesKey("rendering_mode")
+    val GOP_INTERVAL = stringPreferencesKey("gop_interval")
+    val COLOR_RANGE = stringPreferencesKey("color_range")
+    val AUDIO_FORMAT = stringPreferencesKey("audio_format")
   }
 
   val settingsFlow: Flow<RecordingSettings> =
@@ -153,14 +189,6 @@ class RecordingSettingsRepository(private val context: Context) {
           enumValueOrDefault(prefs[Keys.AUDIO_SOURCE], AudioSourceOption.INTERNAL),
         videoBitrate =
           enumValueOrDefault(prefs[Keys.VIDEO_BITRATE], VideoBitrateOption.MBPS_150),
-        colorMode =
-          enumValueOrDefault(prefs[Keys.COLOR_MODE], ColorMode.NORMAL),
-        graphicsBackend =
-          enumValueOrDefault(prefs[Keys.GRAPHICS_BACKEND], GraphicsBackend.VULKAN),
-        videoFps =
-          enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
-        videoCodec =
-          enumValueOrDefault(prefs[Keys.VIDEO_CODEC], VideoCodecOption.H265),
         regionAnimation =
           enumValueOrDefault(prefs[Keys.REGION_ANIMATION], RegionAnimationOption.SHOW),
         selectedRegion =
@@ -171,6 +199,24 @@ class RecordingSettingsRepository(private val context: Context) {
               bottom = prefs[Keys.REGION_BOTTOM] ?: 0.7f,
             )
             .normalized(),
+        bitrateMode =
+          enumValueOrDefault(prefs[Keys.BITRATE_MODE], BitrateModeOption.VBR),
+        colorDepth =
+          enumValueOrDefault(prefs[Keys.COLOR_DEPTH], ColorDepthOption.BIT_8),
+        videoFps =
+          enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
+        colorStandard =
+          enumValueOrDefault(prefs[Keys.COLOR_STANDARD], ColorStandardOption.BT_709),
+        containerMuxer =
+          enumValueOrDefault(prefs[Keys.CONTAINER_MUXER], ContainerMuxerOption.HYBRID_MP4),
+        renderingMode =
+          enumValueOrDefault(prefs[Keys.RENDERING_MODE], RenderingModeOption.ASYNC_SURFACE),
+        gopInterval =
+          enumValueOrDefault(prefs[Keys.GOP_INTERVAL], GopIntervalOption.SEC_1),
+        colorRange =
+          enumValueOrDefault(prefs[Keys.COLOR_RANGE], ColorRangeOption.LIMITED),
+        audioFormat =
+          enumValueOrDefault(prefs[Keys.AUDIO_FORMAT], AudioFormatOption.MONO_AAC),
       )
     }
 
@@ -190,24 +236,44 @@ class RecordingSettingsRepository(private val context: Context) {
     context.settingsDataStore.edit { it[Keys.VIDEO_BITRATE] = bitrate.name }
   }
 
-  suspend fun setColorMode(mode: ColorMode) {
-    context.settingsDataStore.edit { it[Keys.COLOR_MODE] = mode.name }
+  suspend fun setRegionAnimation(animation: RegionAnimationOption) {
+    context.settingsDataStore.edit { it[Keys.REGION_ANIMATION] = animation.name }
   }
 
-  suspend fun setGraphicsBackend(backend: GraphicsBackend) {
-    context.settingsDataStore.edit { it[Keys.GRAPHICS_BACKEND] = backend.name }
+  suspend fun setBitrateMode(mode: BitrateModeOption) {
+    context.settingsDataStore.edit { it[Keys.BITRATE_MODE] = mode.name }
+  }
+
+  suspend fun setColorDepth(depth: ColorDepthOption) {
+    context.settingsDataStore.edit { it[Keys.COLOR_DEPTH] = depth.name }
   }
 
   suspend fun setVideoFps(fps: VideoFpsOption) {
     context.settingsDataStore.edit { it[Keys.VIDEO_FPS] = fps.name }
   }
 
-  suspend fun setVideoCodec(codec: VideoCodecOption) {
-    context.settingsDataStore.edit { it[Keys.VIDEO_CODEC] = codec.name }
+  suspend fun setColorStandard(standard: ColorStandardOption) {
+    context.settingsDataStore.edit { it[Keys.COLOR_STANDARD] = standard.name }
   }
 
-  suspend fun setRegionAnimation(animation: RegionAnimationOption) {
-    context.settingsDataStore.edit { it[Keys.REGION_ANIMATION] = animation.name }
+  suspend fun setContainerMuxer(muxer: ContainerMuxerOption) {
+    context.settingsDataStore.edit { it[Keys.CONTAINER_MUXER] = muxer.name }
+  }
+
+  suspend fun setRenderingMode(mode: RenderingModeOption) {
+    context.settingsDataStore.edit { it[Keys.RENDERING_MODE] = mode.name }
+  }
+
+  suspend fun setGopInterval(interval: GopIntervalOption) {
+    context.settingsDataStore.edit { it[Keys.GOP_INTERVAL] = interval.name }
+  }
+
+  suspend fun setColorRange(range: ColorRangeOption) {
+    context.settingsDataStore.edit { it[Keys.COLOR_RANGE] = range.name }
+  }
+
+  suspend fun setAudioFormat(format: AudioFormatOption) {
+    context.settingsDataStore.edit { it[Keys.AUDIO_FORMAT] = format.name }
   }
 
   suspend fun saveSelectedRegion(region: NormalizedRegion) {
