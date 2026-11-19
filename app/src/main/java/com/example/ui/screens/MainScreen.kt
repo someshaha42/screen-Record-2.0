@@ -46,6 +46,8 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ShutterSpeed
@@ -53,8 +55,10 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.StayCurrentLandscape
 import androidx.compose.material.icons.filled.StayCurrentPortrait
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.VideoSettings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Badge
@@ -101,11 +105,13 @@ import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.service.RecordingPhase
 import com.example.settings.AudioSourceOption
+import com.example.settings.ColorMode
 import com.example.settings.GraphicsBackend
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import com.example.ui.RecorderUiState
 import com.example.ui.components.RegionBorderOverlayCanvas
@@ -124,8 +130,10 @@ fun MainScreen(
   onSelectOrientationMode: (OrientationMode) -> Unit,
   onSelectAudioSource: (AudioSourceOption) -> Unit,
   onSelectBitrate: (VideoBitrateOption) -> Unit,
+  onSelectColorMode: (ColorMode) -> Unit,
   onSelectGraphicsBackend: (GraphicsBackend) -> Unit,
   onSelectVideoFps: (VideoFpsOption) -> Unit,
+  onSelectVideoCodec: (VideoCodecOption) -> Unit,
   onSelectRegionAnimation: (RegionAnimationOption) -> Unit,
   onEditRegion: () -> Unit,
   onRequestOverlayPermission: () -> Unit,
@@ -263,8 +271,10 @@ fun MainScreen(
               onSelectOrientationMode = onSelectOrientationMode,
               onSelectAudioSource = onSelectAudioSource,
               onSelectBitrate = onSelectBitrate,
+              onSelectColorMode = onSelectColorMode,
               onSelectGraphicsBackend = onSelectGraphicsBackend,
               onSelectVideoFps = onSelectVideoFps,
+              onSelectVideoCodec = onSelectVideoCodec,
               onSelectRegionAnimation = onSelectRegionAnimation,
               onEditRegion = onEditRegion,
               onRequestOverlayPermission = onRequestOverlayPermission,
@@ -306,8 +316,10 @@ fun MainScreen(
             onSelectOrientationMode = onSelectOrientationMode,
             onSelectAudioSource = onSelectAudioSource,
             onSelectBitrate = onSelectBitrate,
+            onSelectColorMode = onSelectColorMode,
             onSelectGraphicsBackend = onSelectGraphicsBackend,
             onSelectVideoFps = onSelectVideoFps,
+            onSelectVideoCodec = onSelectVideoCodec,
             onSelectRegionAnimation = onSelectRegionAnimation,
             onEditRegion = onEditRegion,
             onRequestOverlayPermission = onRequestOverlayPermission,
@@ -443,8 +455,10 @@ private fun SettingsCardsSection(
   onSelectOrientationMode: (OrientationMode) -> Unit,
   onSelectAudioSource: (AudioSourceOption) -> Unit,
   onSelectBitrate: (VideoBitrateOption) -> Unit,
+  onSelectColorMode: (ColorMode) -> Unit,
   onSelectGraphicsBackend: (GraphicsBackend) -> Unit,
   onSelectVideoFps: (VideoFpsOption) -> Unit,
+  onSelectVideoCodec: (VideoCodecOption) -> Unit,
   onSelectRegionAnimation: (RegionAnimationOption) -> Unit,
   onEditRegion: () -> Unit,
   onRequestOverlayPermission: () -> Unit,
@@ -482,6 +496,13 @@ private fun SettingsCardsSection(
             onSelectOrientation = onSelectOrientationMode,
           )
         }
+        Box(modifier = Modifier.alpha(settingsAlpha)) {
+          CodecModeCard(
+            selectedCodec = uiState.settings.videoCodec,
+            enabled = isIdle,
+            onSelectCodec = onSelectVideoCodec,
+          )
+        }
         RegionAnimationCard(
           selectedAnimation = uiState.settings.regionAnimation,
           enabled = true,
@@ -501,6 +522,11 @@ private fun SettingsCardsSection(
           selectedBitrate = uiState.settings.videoBitrate,
           enabled = isIdle,
           onSelectBitrate = onSelectBitrate,
+        )
+        ColorModeCard(
+          selectedColorMode = uiState.settings.colorMode,
+          enabled = isIdle,
+          onSelectColorMode = onSelectColorMode,
         )
         GraphicsBackendCard(
           selectedBackend = uiState.settings.graphicsBackend,
@@ -563,6 +589,14 @@ private fun SettingsCardsSection(
       }
 
       Box(modifier = Modifier.alpha(settingsAlpha)) {
+        ColorModeCard(
+          selectedColorMode = uiState.settings.colorMode,
+          enabled = isIdle,
+          onSelectColorMode = onSelectColorMode,
+        )
+      }
+
+      Box(modifier = Modifier.alpha(settingsAlpha)) {
         GraphicsBackendCard(
           selectedBackend = uiState.settings.graphicsBackend,
           enabled = isIdle,
@@ -575,6 +609,14 @@ private fun SettingsCardsSection(
           selectedFps = uiState.settings.videoFps,
           enabled = isIdle,
           onSelectFps = onSelectVideoFps,
+        )
+      }
+
+      Box(modifier = Modifier.alpha(settingsAlpha)) {
+        CodecModeCard(
+          selectedCodec = uiState.settings.videoCodec,
+          enabled = isIdle,
+          onSelectCodec = onSelectVideoCodec,
         )
       }
 
@@ -1101,6 +1143,44 @@ private fun VideoBitrateCard(
 }
 
 @Composable
+private fun ColorModeCard(
+  selectedColorMode: ColorMode,
+  enabled: Boolean,
+  onSelectColorMode: (ColorMode) -> Unit,
+) {
+  SettingsSectionCard(
+    title = stringResource(R.string.section_color_mode),
+    icon = Icons.Default.Palette,
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      OptionTile(
+        title = stringResource(R.string.color_normal),
+        subtitle = stringResource(R.string.color_normal_desc),
+        icon = Icons.Default.Palette,
+        selected = selectedColorMode == ColorMode.NORMAL,
+        enabled = enabled,
+        testTag = "color_normal",
+        onClick = { onSelectColorMode(ColorMode.NORMAL) },
+        modifier = Modifier.weight(1f),
+      )
+      OptionTile(
+        title = stringResource(R.string.color_rgb8888),
+        subtitle = stringResource(R.string.color_rgb8888_desc),
+        icon = Icons.Default.Tonality,
+        selected = selectedColorMode == ColorMode.RGB_8888,
+        enabled = enabled,
+        testTag = "color_rgb8888",
+        onClick = { onSelectColorMode(ColorMode.RGB_8888) },
+        modifier = Modifier.weight(1f),
+      )
+    }
+  }
+}
+
+@Composable
 private fun GraphicsBackendCard(
   selectedBackend: GraphicsBackend,
   enabled: Boolean,
@@ -1170,6 +1250,44 @@ private fun VideoFpsCard(
         enabled = enabled,
         testTag = "fps_60",
         onClick = { onSelectFps(VideoFpsOption.FPS_60) },
+        modifier = Modifier.weight(1f),
+      )
+    }
+  }
+}
+
+@Composable
+private fun CodecModeCard(
+  selectedCodec: VideoCodecOption,
+  enabled: Boolean,
+  onSelectCodec: (VideoCodecOption) -> Unit,
+) {
+  SettingsSectionCard(
+    title = stringResource(R.string.section_codec_mode),
+    icon = Icons.Default.VideoSettings,
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      OptionTile(
+        title = stringResource(R.string.codec_h265),
+        subtitle = stringResource(R.string.codec_h265_desc),
+        icon = Icons.Default.HighQuality,
+        selected = selectedCodec == VideoCodecOption.H265,
+        enabled = enabled,
+        testTag = "codec_h265",
+        onClick = { onSelectCodec(VideoCodecOption.H265) },
+        modifier = Modifier.weight(1f),
+      )
+      OptionTile(
+        title = stringResource(R.string.codec_h264),
+        subtitle = stringResource(R.string.codec_h264_desc),
+        icon = Icons.Default.Movie,
+        selected = selectedCodec == VideoCodecOption.H264,
+        enabled = enabled,
+        testTag = "codec_h264",
+        onClick = { onSelectCodec(VideoCodecOption.H264) },
         modifier = Modifier.weight(1f),
       )
     }

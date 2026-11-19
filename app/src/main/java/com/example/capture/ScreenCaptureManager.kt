@@ -24,6 +24,7 @@ import android.view.Display
 import android.view.Surface
 import com.example.compat.PlatformCompat
 import com.example.region.PixelRegion
+import com.example.settings.ColorMode
 import com.example.settings.GraphicsBackend
 import com.example.settings.InternalRecordingConfig
 import java.nio.ByteBuffer
@@ -34,8 +35,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Manages MediaProjection, VirtualDisplay, dynamic display resize handling, and the OpenGL ES 2.0
- * GPU surface-to-surface pipeline for both Full Screen capture and pixel-exact Region cropping
+ * Manages MediaProjection, VirtualDisplay, dynamic display resize handling, and the GPU
+ * surface-to-surface pipeline for both Full Screen capture and pixel-exact Region cropping
  * within the user's selected Portrait or Landscape orientation without CPU frame copies.
  */
 class ScreenCaptureManager(
@@ -47,6 +48,7 @@ class ScreenCaptureManager(
   private val cropRegion: PixelRegion?,
   private val targetFps: Int = InternalRecordingConfig.TARGET_FPS,
   private val graphicsBackend: GraphicsBackend = GraphicsBackend.VULKAN,
+  private val colorMode: ColorMode = ColorMode.NORMAL,
   private val onProjectionStopped: () -> Unit,
 ) {
   private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -126,6 +128,7 @@ class ScreenCaptureManager(
             cropRegion = cropRegion,
             targetFps = targetFps,
             graphicsBackend = graphicsBackend,
+            colorMode = colorMode,
             hasVulkanHardware = hasVulkanHardware,
           )
         pipeline.initGl()
@@ -226,6 +229,7 @@ private class GlVideoPipeline(
   private val cropRegion: PixelRegion?,
   targetFps: Int,
   private val graphicsBackend: GraphicsBackend,
+  private val colorMode: ColorMode,
   private val hasVulkanHardware: Boolean,
 ) : SurfaceTexture.OnFrameAvailableListener {
 
@@ -270,7 +274,8 @@ private class GlVideoPipeline(
     check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "Unable to initialize EGL14" }
 
     val preferEs3 = graphicsBackend == GraphicsBackend.OPENGL_ES_3 || graphicsBackend == GraphicsBackend.VULKAN
-    val config = chooseBestConfig(preferEs3 = preferEs3)
+    val isRgb8888 = colorMode == ColorMode.RGB_8888
+    val config = chooseBestConfig(preferEs3 = preferEs3, strictRgba8888 = isRgb8888)
 
     if (preferEs3) {
       val es3ContextAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE)
@@ -299,21 +304,44 @@ private class GlVideoPipeline(
       "eglMakeCurrent failed"
     }
 
+    if (isRgb8888) {
+      // Disable dithering so exact 8:8:8:8 RGBA values pass through unaltered
+      GLES20.glDisable(GLES20.GL_DITHER)
+      val rBits = queryEglAttrib(config, EGL14.EGL_RED_SIZE)
+      val gBits = queryEglAttrib(config, EGL14.EGL_GREEN_SIZE)
+      val bBits = queryEglAttrib(config, EGL14.EGL_BLUE_SIZE)
+      val aBits = queryEglAttrib(config, EGL14.EGL_ALPHA_SIZE)
+      Log.i(TAG, "RGB 8:8:8:8 EGLConfig verified: R=$rBits G=$gBits B=$bBits A=$aBits")
+    }
+
     programId =
-      if (useEs3Pipeline) {
-        runCatching { createProgram(VERTEX_SHADER_ES3, FRAGMENT_SHADER_ES3) }
-          .getOrElse {
-            Log.w(TAG, "ES 3.0 external texture shader unavailable, falling back to ES 2.0 shader", it)
-            useEs3Pipeline = false
-            createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-          }
+      if (isRgb8888) {
+        if (useEs3Pipeline) {
+          runCatching { createProgram(VERTEX_SHADER_RGB8888_ES3, FRAGMENT_SHADER_RGB8888_ES3) }
+            .getOrElse {
+              Log.w(TAG, "ES 3.0 RGB8888 shader unavailable, falling back to ES 2.0 RGB8888 shader", it)
+              useEs3Pipeline = false
+              createProgram(VERTEX_SHADER_RGB8888, FRAGMENT_SHADER_RGB8888)
+            }
+        } else {
+          createProgram(VERTEX_SHADER_RGB8888, FRAGMENT_SHADER_RGB8888)
+        }
       } else {
-        createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+        if (useEs3Pipeline) {
+          runCatching { createProgram(VERTEX_SHADER_ES3, FRAGMENT_SHADER_ES3) }
+            .getOrElse {
+              Log.w(TAG, "ES 3.0 external texture shader unavailable, falling back to ES 2.0 shader", it)
+              useEs3Pipeline = false
+              createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+            }
+        } else {
+          createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+        }
       }
 
     Log.i(
       TAG,
-      "Graphics pipeline ready: selected=${graphicsBackend.label}, " +
+      "Graphics pipeline ready: selected=${graphicsBackend.label}, colorMode=${colorMode.label}, " +
         "vulkanHardware=$hasVulkanHardware, activeShader=${if (useEs3Pipeline) "GLES30" else "GLES20"}, " +
         "minIntervalMs=${minFrameIntervalNs / 1_000_000L}",
     )
@@ -330,15 +358,16 @@ private class GlVideoPipeline(
     }
     textureId = textures[0]
     GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+    val texFilter = resolveTextureFilter()
     GLES20.glTexParameteri(
       GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
       GLES20.GL_TEXTURE_MIN_FILTER,
-      GLES20.GL_LINEAR,
+      texFilter,
     )
     GLES20.glTexParameteri(
       GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
       GLES20.GL_TEXTURE_MAG_FILTER,
-      GLES20.GL_LINEAR,
+      texFilter,
     )
     GLES20.glTexParameteri(
       GLES11Ext.GL_TEXTURE_EXTERNAL_OES,
@@ -379,7 +408,27 @@ private class GlVideoPipeline(
     captureWidth = newW
     captureHeight = newH
     surfaceTexture?.setDefaultBufferSize(newW, newH)
+    if (colorMode == ColorMode.RGB_8888 && textureId != 0) {
+      val texFilter = resolveTextureFilter()
+      GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+      GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, texFilter)
+      GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, texFilter)
+    }
     recomputeGeometry()
+  }
+
+  private fun resolveTextureFilter(): Int {
+    if (colorMode != ColorMode.RGB_8888) return GLES20.GL_LINEAR
+    val isExact1To1 =
+      if (cropRegion == null) {
+        captureWidth == outputWidth && captureHeight == outputHeight
+      } else {
+        captureWidth == cropRegion.screenWidth &&
+          captureHeight == cropRegion.screenHeight &&
+          cropRegion.width == outputWidth &&
+          cropRegion.height == outputHeight
+      }
+    return if (isExact1To1) GLES20.GL_NEAREST else GLES20.GL_LINEAR
   }
 
   private fun recomputeGeometry() {
@@ -535,9 +584,44 @@ private class GlVideoPipeline(
     eglDisplay = EGL14.EGL_NO_DISPLAY
   }
 
-  private fun chooseBestConfig(preferEs3: Boolean): EGLConfig {
+  private fun queryEglAttrib(config: EGLConfig, attrib: Int): Int {
+    val value = IntArray(1)
+    return if (EGL14.eglGetConfigAttrib(eglDisplay, config, attrib, value, 0)) value[0] else -1
+  }
+
+  private fun chooseBestConfig(preferEs3: Boolean, strictRgba8888: Boolean): EGLConfig {
     val configs = arrayOfNulls<EGLConfig>(1)
     val numConfigs = IntArray(1)
+    if (strictRgba8888) {
+      val renderableBits =
+        if (preferEs3) {
+          listOf(EGL_OPENGL_ES3_BIT_KHR, EGL14.EGL_OPENGL_ES2_BIT)
+        } else {
+          listOf(EGL14.EGL_OPENGL_ES2_BIT)
+        }
+      for (renderableType in renderableBits) {
+        val strictAttribs =
+          intArrayOf(
+            EGL14.EGL_RED_SIZE, 8,
+            EGL14.EGL_GREEN_SIZE, 8,
+            EGL14.EGL_BLUE_SIZE, 8,
+            EGL14.EGL_ALPHA_SIZE, 8,
+            EGL14.EGL_DEPTH_SIZE, 0,
+            EGL14.EGL_STENCIL_SIZE, 0,
+            EGL14.EGL_CONFIG_CAVEAT, EGL14.EGL_NONE,
+            EGL14.EGL_RENDERABLE_TYPE, renderableType,
+            EGL_RECORDABLE_ANDROID, 1,
+            EGL14.EGL_NONE,
+          )
+        if (
+          EGL14.eglChooseConfig(eglDisplay, strictAttribs, 0, configs, 0, 1, numConfigs, 0) &&
+            numConfigs[0] > 0 &&
+            configs[0] != null
+        ) {
+          return configs[0]!!
+        }
+      }
+    }
     if (preferEs3) {
       val es3Attribs =
         intArrayOf(
@@ -649,6 +733,55 @@ private class GlVideoPipeline(
       """#version 300 es
       #extension GL_OES_EGL_image_external_essl3 : require
       precision mediump float;
+      in vec2 vTexCoord;
+      uniform samplerExternalOES sTexture;
+      out vec4 fragColor;
+      void main() {
+        fragColor = texture(sTexture, vTexCoord);
+      }
+      """
+
+    private const val VERTEX_SHADER_RGB8888 =
+      """
+      precision highp float;
+      attribute vec4 aPosition;
+      attribute vec4 aTexCoord;
+      uniform mat4 uTexMatrix;
+      varying vec2 vTexCoord;
+      void main() {
+        gl_Position = aPosition;
+        vTexCoord = (uTexMatrix * aTexCoord).xy;
+      }
+      """
+
+    private const val FRAGMENT_SHADER_RGB8888 =
+      """
+      #extension GL_OES_EGL_image_external : require
+      precision highp float;
+      varying vec2 vTexCoord;
+      uniform samplerExternalOES sTexture;
+      void main() {
+        gl_FragColor = texture2D(sTexture, vTexCoord);
+      }
+      """
+
+    private const val VERTEX_SHADER_RGB8888_ES3 =
+      """#version 300 es
+      precision highp float;
+      in vec4 aPosition;
+      in vec4 aTexCoord;
+      uniform mat4 uTexMatrix;
+      out vec2 vTexCoord;
+      void main() {
+        gl_Position = aPosition;
+        vTexCoord = (uTexMatrix * aTexCoord).xy;
+      }
+      """
+
+    private const val FRAGMENT_SHADER_RGB8888_ES3 =
+      """#version 300 es
+      #extension GL_OES_EGL_image_external_essl3 : require
+      precision highp float;
       in vec2 vTexCoord;
       uniform samplerExternalOES sTexture;
       out vec4 fragColor;

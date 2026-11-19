@@ -17,6 +17,7 @@ import com.example.service.RecordingService
 import com.example.service.RecordingSessionState
 import com.example.service.RecordingSessionStore
 import com.example.settings.AudioSourceOption
+import com.example.settings.ColorMode
 import com.example.settings.GraphicsBackend
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
@@ -25,6 +26,7 @@ import com.example.settings.RecordingSettings
 import com.example.settings.RecordingSettingsRepository
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -157,6 +159,14 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setVideoBitrate(bitrate) }
   }
 
+  @Volatile private var latestColorModeOverride: ColorMode? = null
+
+  fun setColorMode(mode: ColorMode) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestColorModeOverride = mode
+    viewModelScope.launch { settingsRepo.setColorMode(mode) }
+  }
+
   @Volatile private var latestGraphicsBackendOverride: GraphicsBackend? = null
 
   fun setGraphicsBackend(backend: GraphicsBackend) {
@@ -171,6 +181,14 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     if (uiState.value.session.phase != RecordingPhase.IDLE) return
     latestVideoFpsOverride = fps
     viewModelScope.launch { settingsRepo.setVideoFps(fps) }
+  }
+
+  @Volatile private var latestVideoCodecOverride: VideoCodecOption? = null
+
+  fun setVideoCodec(codec: VideoCodecOption) {
+    if (uiState.value.session.phase != RecordingPhase.IDLE) return
+    latestVideoCodecOverride = codec
+    viewModelScope.launch { settingsRepo.setVideoCodec(codec) }
   }
 
   @Volatile private var latestRegionAnimationOverride: RegionAnimationOption? = null
@@ -210,14 +228,18 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
   fun startRecording(resultCode: Int, resultData: Intent) {
     val baseSettings = uiState.value.settings
     val effectiveOrientation = latestOrientationModeOverride ?: baseSettings.orientationMode
+    val effectiveColorMode = latestColorModeOverride ?: baseSettings.colorMode
     val effectiveGraphics = latestGraphicsBackendOverride ?: baseSettings.graphicsBackend
     val effectiveFps = latestVideoFpsOverride ?: baseSettings.videoFps
+    val effectiveCodec = latestVideoCodecOverride ?: baseSettings.videoCodec
     val effectiveAnimation = latestRegionAnimationOverride ?: baseSettings.regionAnimation
     val currentSettings =
       baseSettings.copy(
         orientationMode = effectiveOrientation,
+        colorMode = effectiveColorMode,
         graphicsBackend = effectiveGraphics,
         videoFps = effectiveFps,
+        videoCodec = effectiveCodec,
         regionAnimation = effectiveAnimation,
       )
     val intent =

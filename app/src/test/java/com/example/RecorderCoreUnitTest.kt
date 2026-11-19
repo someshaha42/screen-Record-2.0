@@ -1,8 +1,10 @@
 package com.example
 
 import android.media.MediaFormat
+import com.example.encoder.VideoEncoder
 import com.example.region.RegionSelectionManager
 import com.example.settings.AudioSourceOption
+import com.example.settings.ColorMode
 import com.example.settings.GraphicsBackend
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.NormalizedRegion
@@ -11,6 +13,7 @@ import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,11 +31,26 @@ class RecorderCoreUnitTest {
     assertEquals(30, InternalRecordingConfig.TARGET_FPS)
     assertEquals(AudioSourceOption.INTERNAL, defaults.audioSource)
     assertEquals(VideoBitrateOption.MBPS_150, defaults.videoBitrate)
+    assertEquals(ColorMode.NORMAL, defaults.colorMode)
+    assertEquals(listOf(ColorMode.NORMAL, ColorMode.RGB_8888), ColorMode.entries)
     assertEquals(GraphicsBackend.VULKAN, defaults.graphicsBackend)
     assertEquals(listOf(GraphicsBackend.VULKAN, GraphicsBackend.OPENGL_ES_3), GraphicsBackend.entries)
     assertEquals(VideoFpsOption.FPS_30, defaults.videoFps)
     assertEquals(listOf(VideoFpsOption.FPS_30, VideoFpsOption.FPS_60), VideoFpsOption.entries)
     assertEquals(listOf(30, 60), VideoFpsOption.entries.map { it.fps })
+    assertEquals(VideoCodecOption.H265, defaults.videoCodec)
+    assertEquals(listOf(VideoCodecOption.H265, VideoCodecOption.H264), VideoCodecOption.entries)
+    assertEquals(MediaFormat.MIMETYPE_VIDEO_HEVC, VideoCodecOption.H265.mimeType)
+    assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, VideoCodecOption.H264.mimeType)
+    val avcSelection =
+      VideoEncoder.selectBestEncoder(
+        requestedWidth = 1080,
+        requestedHeight = 2400,
+        availableCodecs = emptyList(),
+        codecOption = VideoCodecOption.H264,
+      )
+    assertEquals(MediaFormat.MIMETYPE_VIDEO_AVC, avcSelection.mimeType)
+    assertEquals("default-avc", avcSelection.codecName)
     assertEquals(
       listOf(
         VideoBitrateOption.MBPS_100,

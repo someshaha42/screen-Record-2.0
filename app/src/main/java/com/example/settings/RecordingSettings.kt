@@ -55,6 +55,16 @@ enum class VideoFpsOption(val fps: Int, val label: String) {
   FPS_60(60, "60 FPS"),
 }
 
+enum class VideoCodecOption(val mimeType: String, val label: String) {
+  H265(MediaFormat.MIMETYPE_VIDEO_HEVC, "H265"),
+  H264(MediaFormat.MIMETYPE_VIDEO_AVC, "H264"),
+}
+
+enum class ColorMode(val label: String) {
+  NORMAL("Normal"),
+  RGB_8888("RGB 8:8:8:8"),
+}
+
 /**
  * Normalized rectangular region in [0f..1f] relative to the full screen dimensions. Storing
  * normalized fractions allows restoring the selected area consistently across launches.
@@ -82,8 +92,10 @@ data class RecordingSettings(
   val orientationMode: OrientationMode = OrientationMode.PORTRAIT,
   val audioSource: AudioSourceOption = AudioSourceOption.INTERNAL,
   val videoBitrate: VideoBitrateOption = VideoBitrateOption.MBPS_150,
+  val colorMode: ColorMode = ColorMode.NORMAL,
   val graphicsBackend: GraphicsBackend = GraphicsBackend.VULKAN,
   val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
+  val videoCodec: VideoCodecOption = VideoCodecOption.H265,
   val regionAnimation: RegionAnimationOption = RegionAnimationOption.SHOW,
   val selectedRegion: NormalizedRegion = NormalizedRegion(),
 )
@@ -101,6 +113,11 @@ object InternalRecordingConfig {
   const val MEDIATEK_HEVC_ENCODER = "c2.mtk.hevc.encoder"
   const val MEDIATEK_LEGACY_HEVC_ENCODER = "OMX.MTK.VIDEO.ENCODER.HEVC"
 
+  const val SNAPDRAGON_AVC_ENCODER = "c2.qti.avc.encoder"
+  const val SNAPDRAGON_LEGACY_AVC_ENCODER = "OMX.qcom.video.encoder.avc"
+  const val MEDIATEK_AVC_ENCODER = "c2.mtk.avc.encoder"
+  const val MEDIATEK_LEGACY_AVC_ENCODER = "OMX.MTK.VIDEO.ENCODER.AVC"
+
   const val SURFACE_COLOR_FORMAT = MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
   const val I_FRAME_INTERVAL_SECONDS = 1
 
@@ -115,8 +132,10 @@ class RecordingSettingsRepository(private val context: Context) {
     val ORIENTATION_MODE = stringPreferencesKey("orientation_mode")
     val AUDIO_SOURCE = stringPreferencesKey("audio_source")
     val VIDEO_BITRATE = stringPreferencesKey("video_bitrate")
+    val COLOR_MODE = stringPreferencesKey("color_mode")
     val GRAPHICS_BACKEND = stringPreferencesKey("graphics_backend")
     val VIDEO_FPS = stringPreferencesKey("video_fps")
+    val VIDEO_CODEC = stringPreferencesKey("video_codec")
     val REGION_ANIMATION = stringPreferencesKey("region_animation")
     val REGION_LEFT = floatPreferencesKey("region_left")
     val REGION_TOP = floatPreferencesKey("region_top")
@@ -134,10 +153,14 @@ class RecordingSettingsRepository(private val context: Context) {
           enumValueOrDefault(prefs[Keys.AUDIO_SOURCE], AudioSourceOption.INTERNAL),
         videoBitrate =
           enumValueOrDefault(prefs[Keys.VIDEO_BITRATE], VideoBitrateOption.MBPS_150),
+        colorMode =
+          enumValueOrDefault(prefs[Keys.COLOR_MODE], ColorMode.NORMAL),
         graphicsBackend =
           enumValueOrDefault(prefs[Keys.GRAPHICS_BACKEND], GraphicsBackend.VULKAN),
         videoFps =
           enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
+        videoCodec =
+          enumValueOrDefault(prefs[Keys.VIDEO_CODEC], VideoCodecOption.H265),
         regionAnimation =
           enumValueOrDefault(prefs[Keys.REGION_ANIMATION], RegionAnimationOption.SHOW),
         selectedRegion =
@@ -167,12 +190,20 @@ class RecordingSettingsRepository(private val context: Context) {
     context.settingsDataStore.edit { it[Keys.VIDEO_BITRATE] = bitrate.name }
   }
 
+  suspend fun setColorMode(mode: ColorMode) {
+    context.settingsDataStore.edit { it[Keys.COLOR_MODE] = mode.name }
+  }
+
   suspend fun setGraphicsBackend(backend: GraphicsBackend) {
     context.settingsDataStore.edit { it[Keys.GRAPHICS_BACKEND] = backend.name }
   }
 
   suspend fun setVideoFps(fps: VideoFpsOption) {
     context.settingsDataStore.edit { it[Keys.VIDEO_FPS] = fps.name }
+  }
+
+  suspend fun setVideoCodec(codec: VideoCodecOption) {
+    context.settingsDataStore.edit { it[Keys.VIDEO_CODEC] = codec.name }
   }
 
   suspend fun setRegionAnimation(animation: RegionAnimationOption) {

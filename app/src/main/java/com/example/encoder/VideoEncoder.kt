@@ -8,8 +8,10 @@ import android.os.Build
 import android.util.Log
 import android.view.Surface
 import com.example.muxer.MediaMuxerManager
+import com.example.settings.ColorMode
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.VideoBitrateOption
+import com.example.settings.VideoCodecOption
 import com.example.settings.VideoFpsOption
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -26,12 +28,21 @@ data class EncoderSelection(
   val effectiveBitrateBps: Int,
   val alignedWidth: Int,
   val alignedHeight: Int,
+  val mimeType: String = InternalRecordingConfig.VIDEO_MIME_TYPE,
+)
+
+data class RgbColorCapabilityReport(
+  val supportsSurfaceInput: Boolean,
+  val supportsDirectRgbaBuffer: Boolean,
+  val supportsVbr: Boolean,
+  val maxProfile: Int?,
+  val maxLevel: Int?,
 )
 
 /**
- * Hardware-first H.265/HEVC (30/60 FPS) MediaCodec encoder with chipset detection (Snapdragon
- * c2.qti.hevc.encoder, MediaTek c2.mtk.hevc.encoder), automatic capability clamping, and dedicated
- * surface input.
+ * Hardware-first H.265/HEVC and H.264/AVC (30/60 FPS) MediaCodec encoder with chipset detection,
+ * automatic capability clamping, dedicated surface input, and separate Normal vs RGB 8:8:8:8
+ * color fidelity configurations.
  */
 class VideoEncoder(
   private val requestedWidth: Int,
@@ -39,6 +50,8 @@ class VideoEncoder(
   private val bitrateOption: VideoBitrateOption,
   private val muxerManager: MediaMuxerManager,
   private val fpsOption: VideoFpsOption = VideoFpsOption.FPS_30,
+  private val codecOption: VideoCodecOption = VideoCodecOption.H265,
+  private val colorMode: ColorMode = ColorMode.NORMAL,
 ) {
   private var mediaCodec: MediaCodec? = null
   private var inputSurface: Surface? = null
@@ -53,24 +66,37 @@ class VideoEncoder(
         requestedHeight = requestedHeight,
         bitrateOption = bitrateOption,
         fpsOption = fpsOption,
+        codecOption = codecOption,
       )
 
     val codec =
       runCatching { MediaCodec.createByCodecName(selected.codecName) }
         .getOrElse {
           Log.w(TAG, "Preferred codec ${selected.codecName} failed to instantiate, using default", it)
-          MediaCodec.createEncoderByType(InternalRecordingConfig.VIDEO_MIME_TYPE)
+          MediaCodec.createEncoderByType(codecOption.mimeType)
         }
 
-    val primaryFormat = buildFormat(codec.codecInfo, selected, includeAdvanced = true)
-    try {
-      codec.configure(primaryFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-    } catch (e: Exception) {
-      Log.w(TAG, "Primary format config rejected; retrying safe baseline config", e)
-      val safeBitrate = selected.effectiveBitrateBps.coerceAtMost(50_000_000)
-      selected = selected.copy(effectiveBitrateBps = safeBitrate)
-      val safeFormat = buildFormat(codec.codecInfo, selected, includeAdvanced = false)
-      codec.configure(safeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+    if (colorMode == ColorMode.RGB_8888) {
+      val report = inspectRgbColorCapabilities(codec.codecInfo, selected.mimeType)
+      Log.i(
+        TAG,
+        "RGB 8:8:8:8 capability inspection: codec=${selected.codecName}, " +
+          "surfaceInput=${report.supportsSurfaceInput}, directRgba=${report.supportsDirectRgbaBuffer}, " +
+          "vbr=${report.supportsVbr}, maxProfile=${report.maxProfile}, " +
+          "note=GPU RGBA8888 surface fed to hardware encoder CSC",
+      )
+      configureRgb8888Codec(codec, selected, report)
+    } else {
+      val primaryFormat = buildNormalFormat(codec.codecInfo, selected, includeAdvanced = true)
+      try {
+        codec.configure(primaryFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      } catch (e: Exception) {
+        Log.w(TAG, "Primary format config rejected; retrying safe baseline config", e)
+        val safeBitrate = selected.effectiveBitrateBps.coerceAtMost(50_000_000)
+        selected = selected.copy(effectiveBitrateBps = safeBitrate)
+        val safeFormat = buildNormalFormat(codec.codecInfo, selected, includeAdvanced = false)
+        codec.configure(safeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      }
     }
     selection = selected
 
@@ -87,21 +113,70 @@ class VideoEncoder(
 
     Log.i(
       TAG,
-      "VideoEncoder started: codec=${selected.codecName} (H.265), " +
-        "fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, " +
+      "VideoEncoder started: codec=${selected.codecName} (${codecOption.label}), " +
+        "colorMode=${colorMode.label}, fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, " +
         "chipset=${selected.chipsetFamily}, size=${selected.alignedWidth}x${selected.alignedHeight}, " +
         "bitrate=${selected.effectiveBitrateBps / 1_000_000}Mbps",
     )
     return selected
   }
 
-  private fun buildFormat(
+  private fun configureRgb8888Codec(
+    codec: MediaCodec,
+    selected: EncoderSelection,
+    report: RgbColorCapabilityReport,
+  ) {
+    // Attempt 1: BT.709 + SDR transfer + full 0-255 color range + highest compatible profile (no resolution/FPS/bitrate reduction)
+    val fullRangeFormat =
+      buildRgb8888Format(
+        codecInfo = codec.codecInfo,
+        selected = selected,
+        colorRange = MediaFormat.COLOR_RANGE_FULL,
+        includeProfile = true,
+        report = report,
+      )
+    try {
+      codec.configure(fullRangeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      return
+    } catch (e: Exception) {
+      Log.w(TAG, "RGB 8:8:8:8 full-range config rejected; falling back to BT.709 limited-range", e)
+    }
+
+    // Attempt 2: BT.709 + SDR transfer + limited color range (still preserving full resolution, FPS, and bitrate)
+    val limitedRangeFormat =
+      buildRgb8888Format(
+        codecInfo = codec.codecInfo,
+        selected = selected,
+        colorRange = MediaFormat.COLOR_RANGE_LIMITED,
+        includeProfile = true,
+        report = report,
+      )
+    try {
+      codec.configure(limitedRangeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      return
+    } catch (e: Exception) {
+      Log.w(TAG, "RGB 8:8:8:8 profiled limited-range rejected; retrying clean baseline without profile override", e)
+    }
+
+    // Attempt 3: Clean BT.709 baseline preserving user resolution, FPS, and bitrate
+    val cleanBaselineFormat =
+      buildRgb8888Format(
+        codecInfo = codec.codecInfo,
+        selected = selected,
+        colorRange = MediaFormat.COLOR_RANGE_LIMITED,
+        includeProfile = false,
+        report = report,
+      )
+    codec.configure(cleanBaselineFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+  }
+
+  private fun buildNormalFormat(
     codecInfo: MediaCodecInfo,
     selected: EncoderSelection,
     includeAdvanced: Boolean,
   ): MediaFormat {
     return MediaFormat.createVideoFormat(
-        InternalRecordingConfig.VIDEO_MIME_TYPE,
+        selected.mimeType,
         selected.alignedWidth,
         selected.alignedHeight,
       )
@@ -116,8 +191,43 @@ class VideoEncoder(
         if (includeAdvanced) {
           setInteger(MediaFormat.KEY_CAPTURE_RATE, fpsOption.fps)
           setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
-          configureBitrateModeAndProfile(this, codecInfo)
+          configureBitrateModeAndProfile(this, codecInfo, selected.mimeType, forceProfile = false)
         }
+      }
+  }
+
+  private fun buildRgb8888Format(
+    codecInfo: MediaCodecInfo,
+    selected: EncoderSelection,
+    colorRange: Int,
+    includeProfile: Boolean,
+    report: RgbColorCapabilityReport,
+  ): MediaFormat {
+    return MediaFormat.createVideoFormat(
+        selected.mimeType,
+        selected.alignedWidth,
+        selected.alignedHeight,
+      )
+      .apply {
+        setInteger(MediaFormat.KEY_COLOR_FORMAT, InternalRecordingConfig.SURFACE_COLOR_FORMAT)
+        setInteger(MediaFormat.KEY_BIT_RATE, selected.effectiveBitrateBps)
+        setInteger(MediaFormat.KEY_FRAME_RATE, fpsOption.fps)
+        setInteger(MediaFormat.KEY_CAPTURE_RATE, fpsOption.fps)
+        setInteger(
+          MediaFormat.KEY_I_FRAME_INTERVAL,
+          InternalRecordingConfig.I_FRAME_INTERVAL_SECONDS,
+        )
+        setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+        setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        setInteger(MediaFormat.KEY_COLOR_RANGE, colorRange)
+        configureBitrateModeAndProfile(
+          format = this,
+          info = codecInfo,
+          mimeType = selected.mimeType,
+          forceProfile = includeProfile,
+          preferredProfile = report.maxProfile,
+          preferredLevel = report.maxLevel,
+        )
       }
   }
 
@@ -200,10 +310,58 @@ class VideoEncoder(
     drainThread = null
   }
 
-  private fun configureBitrateModeAndProfile(format: MediaFormat, info: MediaCodecInfo) {
-    val caps =
-      runCatching { info.getCapabilitiesForType(InternalRecordingConfig.VIDEO_MIME_TYPE) }
-        .getOrNull() ?: return
+  private fun inspectRgbColorCapabilities(
+    info: MediaCodecInfo,
+    mimeType: String,
+  ): RgbColorCapabilityReport {
+    val caps = runCatching { info.getCapabilitiesForType(mimeType) }.getOrNull()
+    val formats = caps?.colorFormats?.toSet().orEmpty()
+    val supportsSurface = formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+    val supportsDirectRgba =
+      formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_Format32bitABGR8888) ||
+        formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatRGBAFlexible)
+    val supportsVbr =
+      caps?.encoderCapabilities?.isBitrateModeSupported(
+        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+      ) == true
+    val matchedProfileLevel = selectBestProfileLevel(caps, mimeType)
+    return RgbColorCapabilityReport(
+      supportsSurfaceInput = supportsSurface,
+      supportsDirectRgbaBuffer = supportsDirectRgba,
+      supportsVbr = supportsVbr,
+      maxProfile = matchedProfileLevel?.profile,
+      maxLevel = matchedProfileLevel?.level,
+    )
+  }
+
+  private fun selectBestProfileLevel(
+    caps: MediaCodecInfo.CodecCapabilities?,
+    mimeType: String,
+  ): MediaCodecInfo.CodecProfileLevel? {
+    val levels = caps?.profileLevels ?: return null
+    return if (mimeType.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true)) {
+      levels
+        .filter { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
+        .maxByOrNull { it.level }
+        ?: levels
+          .filter { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileMain }
+          .maxByOrNull { it.level }
+    } else {
+      levels
+        .filter { it.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain }
+        .maxByOrNull { it.level }
+    }
+  }
+
+  private fun configureBitrateModeAndProfile(
+    format: MediaFormat,
+    info: MediaCodecInfo,
+    mimeType: String,
+    forceProfile: Boolean,
+    preferredProfile: Int? = null,
+    preferredLevel: Int? = null,
+  ) {
+    val caps = runCatching { info.getCapabilitiesForType(mimeType) }.getOrNull() ?: return
 
     val encoderCaps = caps.encoderCapabilities
     if (encoderCaps != null) {
@@ -221,11 +379,13 @@ class VideoEncoder(
       }
     }
 
-    if (bitrateOption.targetBitsPerSecond >= 200_000_000) {
-      val matchedProfile =
-        caps.profileLevels
-          ?.filter { it.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain }
-          ?.maxByOrNull { it.level }
+    if (forceProfile) {
+      if (preferredProfile != null && preferredLevel != null) {
+        format.setInteger(MediaFormat.KEY_PROFILE, preferredProfile)
+        format.setInteger(MediaFormat.KEY_LEVEL, preferredLevel)
+      }
+    } else if (bitrateOption.targetBitsPerSecond >= 200_000_000) {
+      val matchedProfile = selectBestProfileLevel(caps, mimeType)
       if (matchedProfile != null) {
         format.setInteger(MediaFormat.KEY_PROFILE, matchedProfile.profile)
         format.setInteger(MediaFormat.KEY_LEVEL, matchedProfile.level)
@@ -264,36 +424,56 @@ class VideoEncoder(
         MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos.toList(),
       chipsetFamily: ChipsetFamily = detectChipsetFamily(),
       fpsOption: VideoFpsOption = VideoFpsOption.FPS_30,
+      codecOption: VideoCodecOption = VideoCodecOption.H265,
     ): EncoderSelection {
-      val hevcEncoders =
+      val targetMime = codecOption.mimeType
+      val matchingEncoders =
         availableCodecs.filter { info ->
           info.isEncoder &&
-            info.supportedTypes.any {
-              it.equals(InternalRecordingConfig.VIDEO_MIME_TYPE, ignoreCase = true)
-            } &&
-            supportsSurfaceInput(info)
+            info.supportedTypes.any { it.equals(targetMime, ignoreCase = true) } &&
+            supportsSurfaceInput(info, targetMime)
         }
 
-      val hardwareEncoders = hevcEncoders.filter { isHardwareCodec(it) }
-      val pool = hardwareEncoders.ifEmpty { hevcEncoders }
+      val hardwareEncoders = matchingEncoders.filter { isHardwareCodec(it) }
+      val pool = hardwareEncoders.ifEmpty { matchingEncoders }
 
       val preferredNames =
-        when (chipsetFamily) {
-          ChipsetFamily.SNAPDRAGON ->
-            listOf(
-              InternalRecordingConfig.SNAPDRAGON_HEVC_ENCODER,
-              InternalRecordingConfig.SNAPDRAGON_LEGACY_HEVC_ENCODER,
-            )
-          ChipsetFamily.MEDIATEK ->
-            listOf(
-              InternalRecordingConfig.MEDIATEK_HEVC_ENCODER,
-              InternalRecordingConfig.MEDIATEK_LEGACY_HEVC_ENCODER,
-            )
-          ChipsetFamily.OTHER ->
-            listOf(
-              InternalRecordingConfig.SNAPDRAGON_HEVC_ENCODER,
-              InternalRecordingConfig.MEDIATEK_HEVC_ENCODER,
-            )
+        if (codecOption == VideoCodecOption.H264) {
+          when (chipsetFamily) {
+            ChipsetFamily.SNAPDRAGON ->
+              listOf(
+                InternalRecordingConfig.SNAPDRAGON_AVC_ENCODER,
+                InternalRecordingConfig.SNAPDRAGON_LEGACY_AVC_ENCODER,
+              )
+            ChipsetFamily.MEDIATEK ->
+              listOf(
+                InternalRecordingConfig.MEDIATEK_AVC_ENCODER,
+                InternalRecordingConfig.MEDIATEK_LEGACY_AVC_ENCODER,
+              )
+            ChipsetFamily.OTHER ->
+              listOf(
+                InternalRecordingConfig.SNAPDRAGON_AVC_ENCODER,
+                InternalRecordingConfig.MEDIATEK_AVC_ENCODER,
+              )
+          }
+        } else {
+          when (chipsetFamily) {
+            ChipsetFamily.SNAPDRAGON ->
+              listOf(
+                InternalRecordingConfig.SNAPDRAGON_HEVC_ENCODER,
+                InternalRecordingConfig.SNAPDRAGON_LEGACY_HEVC_ENCODER,
+              )
+            ChipsetFamily.MEDIATEK ->
+              listOf(
+                InternalRecordingConfig.MEDIATEK_HEVC_ENCODER,
+                InternalRecordingConfig.MEDIATEK_LEGACY_HEVC_ENCODER,
+              )
+            ChipsetFamily.OTHER ->
+              listOf(
+                InternalRecordingConfig.SNAPDRAGON_HEVC_ENCODER,
+                InternalRecordingConfig.MEDIATEK_HEVC_ENCODER,
+              )
+          }
         }
 
       val chosenInfo =
@@ -306,19 +486,19 @@ class VideoEncoder(
       if (chosenInfo == null) {
         val evenW = alignTo(requestedWidth.coerceAtLeast(128), 2)
         val evenH = alignTo(requestedHeight.coerceAtLeast(128), 2)
+        val fallbackName = if (codecOption == VideoCodecOption.H264) "default-avc" else "default-hevc"
         return EncoderSelection(
-          codecName = "default-hevc",
+          codecName = fallbackName,
           isHardwareAccelerated = false,
           chipsetFamily = chipsetFamily,
           effectiveBitrateBps = bitrateOption.targetBitsPerSecond.coerceAtMost(50_000_000),
           alignedWidth = evenW,
           alignedHeight = evenH,
+          mimeType = targetMime,
         )
       }
 
-      val caps =
-        runCatching { chosenInfo.getCapabilitiesForType(InternalRecordingConfig.VIDEO_MIME_TYPE) }
-          .getOrNull()
+      val caps = runCatching { chosenInfo.getCapabilitiesForType(targetMime) }.getOrNull()
       val videoCaps = caps?.videoCapabilities
 
       val wAlign = (videoCaps?.widthAlignment ?: 2).coerceAtLeast(2)
@@ -393,13 +573,12 @@ class VideoEncoder(
         effectiveBitrateBps = effectiveBitrate,
         alignedWidth = alignedW,
         alignedHeight = alignedH,
+        mimeType = targetMime,
       )
     }
 
-    private fun supportsSurfaceInput(info: MediaCodecInfo): Boolean {
-      val caps =
-        runCatching { info.getCapabilitiesForType(InternalRecordingConfig.VIDEO_MIME_TYPE) }
-          .getOrNull() ?: return false
+    private fun supportsSurfaceInput(info: MediaCodecInfo, mimeType: String): Boolean {
+      val caps = runCatching { info.getCapabilitiesForType(mimeType) }.getOrNull() ?: return false
       return caps.colorFormats.contains(InternalRecordingConfig.SURFACE_COLOR_FORMAT)
     }
 
