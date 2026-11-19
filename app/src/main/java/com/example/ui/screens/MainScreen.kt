@@ -99,16 +99,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.region.PixelRegion
 import com.example.service.RecordingPhase
 import com.example.settings.AudioSourceOption
+import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
+import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
 import com.example.ui.RecorderUiState
 import com.example.ui.components.RegionBorderOverlayCanvas
 import com.example.ui.theme.LocalStudioColors
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -281,8 +283,13 @@ fun MainScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
           ) {
             SettingsCardsSection(
-              uiState = uiState,
+              settings = uiState.settings,
+              selectedPixelRegion = uiState.selectedPixelRegion,
+              canvasWidthPx = uiState.canvasWidthPx,
+              canvasHeightPx = uiState.canvasHeightPx,
+              hasOverlayPermission = uiState.hasOverlayPermission,
               isIdle = isIdle,
+              isRecordingActive = uiState.session.phase == RecordingPhase.RECORDING,
               settingsAlpha = settingsAlpha,
               twoColumns = useTwoColumnsInRightPane,
               onSelectMode = onSelectMode,
@@ -322,8 +329,13 @@ fun MainScreen(
             onOpenRecordings = onOpenRecordings,
           )
           SettingsCardsSection(
-            uiState = uiState,
+            settings = uiState.settings,
+            selectedPixelRegion = uiState.selectedPixelRegion,
+            canvasWidthPx = uiState.canvasWidthPx,
+            canvasHeightPx = uiState.canvasHeightPx,
+            hasOverlayPermission = uiState.hasOverlayPermission,
             isIdle = isIdle,
+            isRecordingActive = uiState.session.phase == RecordingPhase.RECORDING,
             settingsAlpha = settingsAlpha,
             twoColumns = isWideSettingsGrid,
             onSelectMode = onSelectMode,
@@ -457,8 +469,13 @@ private fun RecordingsLibraryButton(
 
 @Composable
 private fun SettingsCardsSection(
-  uiState: RecorderUiState,
+  settings: RecordingSettings,
+  selectedPixelRegion: PixelRegion,
+  canvasWidthPx: Int,
+  canvasHeightPx: Int,
+  hasOverlayPermission: Boolean,
   isIdle: Boolean,
+  isRecordingActive: Boolean,
   settingsAlpha: Float,
   twoColumns: Boolean,
   onSelectMode: (RecordingMode) -> Unit,
@@ -480,15 +497,21 @@ private fun SettingsCardsSection(
       ) {
         Box(modifier = Modifier.alpha(settingsAlpha)) {
           RecordingModeCard(
-            selectedMode = uiState.settings.recordingMode,
+            selectedMode = settings.recordingMode,
             enabled = isIdle,
             onSelectMode = onSelectMode,
           )
         }
-        if (uiState.settings.recordingMode == RecordingMode.REGION) {
+        if (settings.recordingMode == RecordingMode.REGION) {
           Box(modifier = Modifier.alpha(settingsAlpha)) {
             RegionPreviewCard(
-              uiState = uiState,
+              selectedRegion = settings.selectedRegion,
+              selectedPixelRegion = selectedPixelRegion,
+              canvasWidthPx = canvasWidthPx,
+              canvasHeightPx = canvasHeightPx,
+              regionAnimation = settings.regionAnimation,
+              hasOverlayPermission = hasOverlayPermission,
+              isRecordingActive = isRecordingActive,
               enabled = isIdle,
               onEditRegion = onEditRegion,
               onRequestOverlayPermission = onRequestOverlayPermission,
@@ -497,7 +520,7 @@ private fun SettingsCardsSection(
         }
         Box(modifier = Modifier.alpha(settingsAlpha)) {
           OrientationModeCard(
-            selectedOrientation = uiState.settings.orientationMode,
+            selectedOrientation = settings.orientationMode,
             enabled = isIdle,
             onSelectOrientation = onSelectOrientationMode,
           )
@@ -509,20 +532,20 @@ private fun SettingsCardsSection(
       ) {
         Box(modifier = Modifier.alpha(settingsAlpha)) {
           AudioSourceCard(
-            selectedAudio = uiState.settings.audioSource,
+            selectedAudio = settings.audioSource,
             enabled = isIdle,
             onSelectAudio = onSelectAudioSource,
           )
         }
         Box(modifier = Modifier.alpha(settingsAlpha)) {
           VideoBitrateCard(
-            selectedBitrate = uiState.settings.videoBitrate,
+            selectedBitrate = settings.videoBitrate,
             enabled = isIdle,
             onSelectBitrate = onSelectBitrate,
           )
         }
         RegionAnimationCard(
-          selectedAnimation = uiState.settings.regionAnimation,
+          selectedAnimation = settings.regionAnimation,
           enabled = true,
           onSelect = onSelectRegionAnimation,
         )
@@ -535,16 +558,22 @@ private fun SettingsCardsSection(
     ) {
       Box(modifier = Modifier.alpha(settingsAlpha)) {
         RecordingModeCard(
-          selectedMode = uiState.settings.recordingMode,
+          selectedMode = settings.recordingMode,
           enabled = isIdle,
           onSelectMode = onSelectMode,
         )
       }
 
-      AnimatedVisibility(visible = uiState.settings.recordingMode == RecordingMode.REGION) {
+      AnimatedVisibility(visible = settings.recordingMode == RecordingMode.REGION) {
         Box(modifier = Modifier.alpha(settingsAlpha)) {
           RegionPreviewCard(
-            uiState = uiState,
+            selectedRegion = settings.selectedRegion,
+            selectedPixelRegion = selectedPixelRegion,
+            canvasWidthPx = canvasWidthPx,
+            canvasHeightPx = canvasHeightPx,
+            regionAnimation = settings.regionAnimation,
+            hasOverlayPermission = hasOverlayPermission,
+            isRecordingActive = isRecordingActive,
             enabled = isIdle,
             onEditRegion = onEditRegion,
             onRequestOverlayPermission = onRequestOverlayPermission,
@@ -554,7 +583,7 @@ private fun SettingsCardsSection(
 
       Box(modifier = Modifier.alpha(settingsAlpha)) {
         OrientationModeCard(
-          selectedOrientation = uiState.settings.orientationMode,
+          selectedOrientation = settings.orientationMode,
           enabled = isIdle,
           onSelectOrientation = onSelectOrientationMode,
         )
@@ -562,7 +591,7 @@ private fun SettingsCardsSection(
 
       Box(modifier = Modifier.alpha(settingsAlpha)) {
         AudioSourceCard(
-          selectedAudio = uiState.settings.audioSource,
+          selectedAudio = settings.audioSource,
           enabled = isIdle,
           onSelectAudio = onSelectAudioSource,
         )
@@ -570,14 +599,14 @@ private fun SettingsCardsSection(
 
       Box(modifier = Modifier.alpha(settingsAlpha)) {
         VideoBitrateCard(
-          selectedBitrate = uiState.settings.videoBitrate,
+          selectedBitrate = settings.videoBitrate,
           enabled = isIdle,
           onSelectBitrate = onSelectBitrate,
         )
       }
 
       RegionAnimationCard(
-        selectedAnimation = uiState.settings.regionAnimation,
+        selectedAnimation = settings.regionAnimation,
         enabled = true,
         onSelect = onSelectRegionAnimation,
       )
@@ -906,18 +935,23 @@ private fun OrientationModeCard(
 
 @Composable
 private fun RegionPreviewCard(
-  uiState: RecorderUiState,
+  selectedRegion: NormalizedRegion,
+  selectedPixelRegion: PixelRegion,
+  canvasWidthPx: Int,
+  canvasHeightPx: Int,
+  regionAnimation: RegionAnimationOption,
+  hasOverlayPermission: Boolean,
+  isRecordingActive: Boolean,
   enabled: Boolean,
   onEditRegion: () -> Unit,
   onRequestOverlayPermission: () -> Unit,
 ) {
-  val norm = uiState.settings.selectedRegion
-  val pixel = uiState.selectedPixelRegion
+  val norm = selectedRegion
+  val pixel = selectedPixelRegion
   val aspect =
-    (uiState.canvasWidthPx.toFloat() / uiState.canvasHeightPx.toFloat().coerceAtLeast(1f))
+    (canvasWidthPx.toFloat() / canvasHeightPx.toFloat().coerceAtLeast(1f))
       .coerceIn(0.35f, 2.5f)
-  val showAnim = uiState.settings.regionAnimation == RegionAnimationOption.SHOW
-  val isRecordingActive = uiState.session.phase == RecordingPhase.RECORDING
+  val showAnim = regionAnimation == RegionAnimationOption.SHOW
 
   SettingsSectionCard(
     title = stringResource(R.string.section_region_preview),
@@ -993,13 +1027,13 @@ private fun RegionPreviewCard(
           )
           Text(
             text =
-              if (uiState.hasOverlayPermission) stringResource(R.string.overlay_optional_granted)
+              if (hasOverlayPermission) stringResource(R.string.overlay_optional_granted)
               else stringResource(R.string.overlay_optional_denied),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
         }
-        if (!uiState.hasOverlayPermission) {
+        if (!hasOverlayPermission) {
           TextButton(
             onClick = onRequestOverlayPermission,
             enabled = enabled,
@@ -1265,5 +1299,14 @@ private fun formatElapsedTimer(elapsedMs: Long): String {
   val hours = totalSeconds / 3600L
   val minutes = (totalSeconds % 3600L) / 60L
   val seconds = totalSeconds % 60L
-  return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+  return buildString(8) {
+    if (hours < 10L) append('0')
+    append(hours)
+    append(':')
+    if (minutes < 10L) append('0')
+    append(minutes)
+    append(':')
+    if (seconds < 10L) append('0')
+    append(seconds)
+  }
 }

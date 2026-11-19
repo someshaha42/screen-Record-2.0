@@ -19,6 +19,7 @@ import android.view.Display
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import com.example.settings.AudioSourceOption
+import java.lang.ref.WeakReference
 
 /**
  * Centralized forward-compatible platform abstraction layer for Android 16 (API 36), Android 17
@@ -67,10 +68,20 @@ object PlatformCompat {
     }
   }
 
+  @Volatile private var cachedVisualHolder: VisualContextHolder? = null
+
+  private class VisualContextHolder(
+    appContext: Context,
+    visualContext: Context,
+  ) {
+    val appRef = WeakReference(appContext)
+    val visualRef = WeakReference(visualContext)
+  }
+
   /**
-   * Creates a visual overlay WindowContext bound to the default display so Service and Application
-   * contexts can query WindowManager metrics or attach TYPE_APPLICATION_OVERLAY windows without
-   * triggering StrictMode IncorrectContextUseViolation on Android 16/17+.
+   * Creates or reuses a visual overlay WindowContext bound to the default display so Service and
+   * Application contexts can query WindowManager metrics or attach TYPE_APPLICATION_OVERLAY windows
+   * without triggering StrictMode IncorrectContextUseViolation or leaking per-call WindowContexts.
    */
   fun resolveOverlayWindowManager(context: Context): WindowManager {
     val visualContext = createOverlayVisualContext(context)
@@ -82,20 +93,33 @@ object PlatformCompat {
     if (context.isUiContext) {
       return context
     }
-    return runCatching {
-        val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-        val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
-        if (display != null) {
-          val displayContext = context.createDisplayContext(display)
-          displayContext.createWindowContext(
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            null,
-          )
-        } else {
-          context
+    val appCtx = context.applicationContext ?: context
+    val existingHolder = cachedVisualHolder
+    if (existingHolder != null && existingHolder.appRef.get() === appCtx) {
+      existingHolder.visualRef.get()?.let { return it }
+    }
+
+    val created =
+      runCatching {
+          val displayManager = appCtx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+          val display = displayManager.getDisplay(Display.DEFAULT_DISPLAY)
+          if (display != null) {
+            val displayContext = appCtx.createDisplayContext(display)
+            displayContext.createWindowContext(
+              WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+              null,
+            )
+          } else {
+            null
+          }
         }
-      }
-      .getOrElse { context }
+        .getOrNull()
+
+    if (created != null) {
+      cachedVisualHolder = VisualContextHolder(appCtx, created)
+      return created
+    }
+    return context
   }
 
   /**

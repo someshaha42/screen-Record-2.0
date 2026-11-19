@@ -468,7 +468,12 @@ private fun formatDuration(ms: Long): String {
   val totalSec = (ms / 1000L).coerceAtLeast(0L)
   val mins = totalSec / 60L
   val secs = totalSec % 60L
-  return String.format(Locale.US, "%d:%02d", mins, secs)
+  return buildString(6) {
+    append(mins)
+    append(':')
+    if (secs < 10L) append('0')
+    append(secs)
+  }
 }
 
 private fun formatFileSize(bytes: Long): String {

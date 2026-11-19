@@ -103,14 +103,16 @@ class RecordingService : Service() {
 
   private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   private var timerJob: Job? = null
+  private var startJob: Job? = null
 
-  private var muxerManager: MediaMuxerManager? = null
-  private var videoEncoder: VideoEncoder? = null
-  private var audioCaptureManager: AudioCaptureManager? = null
-  private var screenCaptureManager: ScreenCaptureManager? = null
+  @Volatile private var muxerManager: MediaMuxerManager? = null
+  @Volatile private var videoEncoder: VideoEncoder? = null
+  @Volatile private var audioCaptureManager: AudioCaptureManager? = null
+  @Volatile private var screenCaptureManager: ScreenCaptureManager? = null
   private var overlayManager: RegionOverlayManager? = null
-  private var activeMediaProjection: MediaProjection? = null
+  @Volatile private var activeMediaProjection: MediaProjection? = null
 
+  private val isStarting = AtomicBoolean(false)
   private val isStopping = AtomicBoolean(false)
   private var recordingStartElapsedMs = 0L
   private var pauseStartElapsedMs = 0L
@@ -176,11 +178,13 @@ class RecordingService : Service() {
 
   private fun handleStartAction(intent: Intent) {
     if (RecordingSessionStore.state.value.phase != RecordingPhase.IDLE) return
+    if (!isStarting.compareAndSet(false, true)) return
 
     val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
     val resultData: Intent? = intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
 
     if (resultCode != Activity.RESULT_OK || resultData == null) {
+      isStarting.set(false)
       RecordingSessionStore.update {
         it.copy(errorMessage = "Screen capture permission was not granted.")
       }
@@ -291,6 +295,7 @@ class RecordingService : Service() {
 
     // Android 14+/16/17 requires startForeground() BEFORE MediaProjectionManager.getMediaProjection()
     if (!startForegroundCompat(isPaused = false, audioSource = audioSource)) {
+      isStarting.set(false)
       RecordingSessionStore.update {
         it.copy(
           phase = RecordingPhase.IDLE,
@@ -308,6 +313,7 @@ class RecordingService : Service() {
         projectionManager.getMediaProjection(resultCode, resultData)
       } catch (e: Exception) {
         Log.e(TAG, "getMediaProjection failed", e)
+        isStarting.set(false)
         RecordingSessionStore.update {
           it.copy(phase = RecordingPhase.IDLE, errorMessage = "Unable to start screen projection.")
         }
@@ -317,6 +323,7 @@ class RecordingService : Service() {
       }
 
     if (mediaProjection == null) {
+      isStarting.set(false)
       RecordingSessionStore.update {
         it.copy(phase = RecordingPhase.IDLE, errorMessage = "Screen projection session was null.")
       }
@@ -327,11 +334,18 @@ class RecordingService : Service() {
 
     activeMediaProjection = mediaProjection
     isStopping.set(false)
-    startEngine(mediaProjection, settings)
+    startJob =
+      serviceScope.launch(Dispatchers.IO) {
+        startEngine(mediaProjection, settings)
+      }
   }
 
   private fun startEngine(mediaProjection: MediaProjection, settings: RecordingSettings) {
     try {
+      if (isStopping.get()) {
+        releaseAllEngineResources()
+        return
+      }
       val (screenW, screenH, _) = ScreenCaptureManager.queryScreenMetrics(this)
       val (orientedW, orientedH) =
         RegionSelectionManager.resolveFullScreenDimensions(
@@ -452,6 +466,8 @@ class RecordingService : Service() {
       }
       stopForeground(STOP_FOREGROUND_REMOVE)
       stopSelf()
+    } finally {
+      isStarting.set(false)
     }
   }
 
@@ -482,11 +498,13 @@ class RecordingService : Service() {
 
   private fun stopRecording() {
     val currentPhase = RecordingSessionStore.state.value.phase
-    if (currentPhase == RecordingPhase.IDLE || currentPhase == RecordingPhase.FINALIZING) {
+    if (currentPhase == RecordingPhase.IDLE && !isStarting.get()) {
       overlayManager?.hide()
-      if (currentPhase == RecordingPhase.IDLE) {
-        stopSelf()
-      }
+      stopSelf()
+      return
+    }
+    if (currentPhase == RecordingPhase.FINALIZING) {
+      overlayManager?.hide()
       return
     }
     if (!isStopping.compareAndSet(false, true)) {
@@ -501,6 +519,8 @@ class RecordingService : Service() {
     }
 
     serviceScope.launch(Dispatchers.IO) {
+      startJob?.join()
+      startJob = null
       val savedOutput = releaseAllEngineResources()
       RecordingSessionStore.update { prev ->
         prev.copy(

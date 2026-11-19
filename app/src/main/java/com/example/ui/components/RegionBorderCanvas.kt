@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -83,6 +84,13 @@ fun RegionBorderOverlayCanvas(
       null
     }
 
+  val stepIndexState: State<Int>? =
+    remember(stepState) {
+      stepState?.let { animState ->
+        derivedStateOf { animState.value.toInt().mod(DASH_PHASE_STEPS) }
+      }
+    }
+
   Canvas(modifier = modifier) {
     val l = (leftFraction * size.width).coerceIn(0f, size.width)
     val t = (topFraction * size.height).coerceIn(0f, size.height)
@@ -113,7 +121,7 @@ fun RegionBorderOverlayCanvas(
     val rectSize = Size((r - l).coerceAtLeast(1f), (b - t).coerceAtLeast(1f))
 
     if (showBorder && animatedStrokes.isNotEmpty()) {
-      val stepIndex = (stepState?.value?.toInt() ?: 0).mod(DASH_PHASE_STEPS)
+      val stepIndex = stepIndexState?.value ?: 0
       drawRect(
         color = shadowColor,
         topLeft = rectTopLeft,

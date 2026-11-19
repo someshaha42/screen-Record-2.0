@@ -144,7 +144,7 @@ private fun FrameCutApp(
     }
 
   fun beginRecordFlow() {
-    if (uiState.session.phase != RecordingPhase.IDLE) return
+    if (viewModel.uiState.value.session.phase != RecordingPhase.IDLE) return
     val hasNotify =
       ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
         PackageManager.PERMISSION_GRANTED
@@ -163,6 +163,12 @@ private fun FrameCutApp(
     }
   }
 
+  val onStartRecordClick = remember(viewModel, context) { { beginRecordFlow() } }
+  val onPopBack = remember(navController) { { navController.popBackStack(); Unit } }
+  val onDeleteRecording = remember(viewModel) { viewModel::deleteRecording }
+  val onConfirmRegion = remember(viewModel) { viewModel::saveSelectedRegion }
+  val onCancelRegion = remember(viewModel) { viewModel::closeRegionEditor }
+
   Box(modifier = Modifier.fillMaxSize()) {
     NavHost(navController = navController, startDestination = ROUTE_MAIN) {
       composable(ROUTE_MAIN) {
@@ -170,7 +176,7 @@ private fun FrameCutApp(
           uiState = uiState,
           isDarkTheme = isDarkTheme,
           onToggleTheme = remember(viewModel, isDarkTheme) { { viewModel.setDarkTheme(!isDarkTheme) } },
-          onStartRecordClick = { beginRecordFlow() },
+          onStartRecordClick = onStartRecordClick,
           onPauseResumeClick = remember(viewModel) { viewModel::togglePauseResume },
           onStopClick = remember(viewModel) { viewModel::stopRecording },
           onOpenRecordings =
@@ -199,7 +205,7 @@ private fun FrameCutApp(
         SettingsScreen(
           settings = uiState.settings,
           isIdle = uiState.session.phase == RecordingPhase.IDLE,
-          onBack = { navController.popBackStack() },
+          onBack = onPopBack,
           onSelectBitrateMode = remember(viewModel) { viewModel::setBitrateMode },
           onSelectColorDepth = remember(viewModel) { viewModel::setColorDepth },
           onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
@@ -213,8 +219,8 @@ private fun FrameCutApp(
         RecordingsScreen(
           recordings = uiState.recordings,
           isLoading = uiState.isLoadingRecordings,
-          onBack = { navController.popBackStack() },
-          onDelete = { viewModel.deleteRecording(it) },
+          onBack = onPopBack,
+          onDelete = onDeleteRecording,
         )
       }
     }
@@ -225,8 +231,8 @@ private fun FrameCutApp(
         screenWidthPx = uiState.canvasWidthPx,
         screenHeightPx = uiState.canvasHeightPx,
         regionAnimation = uiState.settings.regionAnimation,
-        onConfirm = { region -> viewModel.saveSelectedRegion(region) },
-        onCancel = { viewModel.closeRegionEditor() },
+        onConfirm = onConfirmRegion,
+        onCancel = onCancelRegion,
       )
     }
   }
