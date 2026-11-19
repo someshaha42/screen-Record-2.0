@@ -9,25 +9,337 @@ import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.os.Process
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
+import com.example.diagnostics.RecordingDiagnostics
 import java.nio.ByteBuffer
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.ArrayDeque
 import java.util.Locale
 
 data class MuxerOutput(val uri: Uri, val displayName: String, val filePath: String? = null)
 
 /**
+ * Bounded, reusable direct-ByteBuffer async muxer queue that decouples MediaCodec output buffer
+ * release (microseconds) from MediaMuxer / MediaStore storage I/O (which can stall 5-40ms on flash
+ * flushes). Zero per-frame Kotlin/Java heap allocations after pool warmup.
+ */
+class MuxerPacketQueue(
+  private val diagnostics: RecordingDiagnostics? = null,
+  private val maxVideoPackets: Int = DEFAULT_MAX_VIDEO_PACKETS,
+  private val maxAudioPackets: Int = DEFAULT_MAX_AUDIO_PACKETS,
+  private val maxVideoPoolBytes: Long = DEFAULT_MAX_VIDEO_POOL_BYTES,
+  private val sink: SampleWriterSink,
+) {
+  fun interface SampleWriterSink {
+    fun onWriteSample(
+      isVideo: Boolean,
+      buffer: ByteBuffer,
+      size: Int,
+      ptsUs: Long,
+      flags: Int,
+    )
+  }
+
+  private class QueuedPacket {
+    var isVideo: Boolean = false
+    var buffer: ByteBuffer? = null
+    var size: Int = 0
+    var ptsUs: Long = 0L
+    var flags: Int = 0
+  }
+
+  private val queueLock = Object()
+  private val pendingQueue = ArrayDeque<QueuedPacket>(maxVideoPackets + 16)
+  private val freePackets = ArrayDeque<QueuedPacket>(maxVideoPackets + 16)
+  private val freeVideoBuffers = ArrayDeque<ByteBuffer>(maxVideoPackets)
+  private val freeAudioBuffers = ArrayDeque<ByteBuffer>(maxAudioPackets)
+
+  private var queuedVideoBufferBytes = 0L
+  private var freeVideoBufferBytes = 0L
+  private var inFlightVideoCount = 0
+  private var inFlightAudioCount = 0
+
+  private var sinkReady = false
+  private var closing = false
+  private var started = false
+  private var writerThread: Thread? = null
+
+  fun start() {
+    synchronized(queueLock) {
+      if (started || closing) return
+      started = true
+      writerThread =
+        Thread(::drainLoop, "FrameCut-MuxerWriter").apply {
+          start()
+        }
+    }
+  }
+
+  fun markSinkReady() {
+    synchronized(queueLock) {
+      sinkReady = true
+      queueLock.notifyAll()
+    }
+  }
+
+  fun submit(
+    isVideo: Boolean,
+    source: ByteBuffer,
+    offset: Int,
+    size: Int,
+    ptsUs: Long,
+    flags: Int,
+  ): Boolean {
+    if (size <= 0) return false
+    var reserved = false
+    var targetBuffer: ByteBuffer? = null
+    var targetBufferCapacity = 0
+
+    try {
+      synchronized(queueLock) {
+        while (
+          !closing &&
+            ((isVideo && inFlightVideoCount >= maxVideoPackets) ||
+              (!isVideo && inFlightAudioCount >= maxAudioPackets))
+        ) {
+          diagnostics?.onMuxerBackpressureWait()
+          try {
+            queueLock.wait()
+          } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+          }
+        }
+        if (closing || !started) return false
+
+        if (isVideo) {
+          inFlightVideoCount++
+        } else {
+          inFlightAudioCount++
+        }
+        reserved = true
+
+        targetBuffer = popReusableBufferLocked(isVideo, size)
+        targetBufferCapacity = targetBuffer?.capacity() ?: 0
+      }
+
+      // Direct buffer allocation (if needed) and memcpy happen OUTSIDE queueLock so audio/video
+      // producers never contend with each other or the writer thread during byte copying.
+      val dst =
+        if (targetBuffer != null && targetBufferCapacity >= size) {
+          targetBuffer!!
+        } else {
+          val allocSize =
+            if (isVideo) {
+              roundUpToBlock(size, VIDEO_BUFFER_ALIGN_BYTES)
+            } else {
+              size.coerceAtLeast(DEFAULT_AUDIO_BUFFER_BYTES)
+            }
+          diagnostics?.onMuxerPoolAllocation()
+          ByteBuffer.allocateDirect(allocSize)
+        }
+
+      dst.clear()
+      val dup = source.duplicate()
+      dup.position(offset)
+      dup.limit(offset + size)
+      dst.put(dup)
+      dst.flip()
+
+      synchronized(queueLock) {
+        if (closing) {
+          releaseSlotAndBufferLocked(isVideo, dst, countVideoBytes = false)
+          reserved = false
+          return false
+        }
+        if (isVideo) {
+          queuedVideoBufferBytes += dst.capacity().toLong()
+        }
+        val packet =
+          if (freePackets.isEmpty()) QueuedPacket() else freePackets.removeFirst()
+        packet.isVideo = isVideo
+        packet.buffer = dst
+        packet.size = size
+        packet.ptsUs = ptsUs
+        packet.flags = flags
+        pendingQueue.addLast(packet)
+        reserved = false
+        diagnostics?.onMuxerQueued(pendingQueue.size)
+        queueLock.notifyAll()
+      }
+      return true
+    } finally {
+      if (reserved) {
+        synchronized(queueLock) {
+          releaseSlotAndBufferLocked(isVideo, targetBuffer, countVideoBytes = false)
+        }
+      }
+    }
+  }
+
+  fun closeAndDrain(timeoutMs: Long = 5000L) {
+    val threadToJoin: Thread?
+    synchronized(queueLock) {
+      closing = true
+      threadToJoin = writerThread
+      queueLock.notifyAll()
+    }
+    if (threadToJoin != null && Thread.currentThread() !== threadToJoin) {
+      try {
+        threadToJoin.join(timeoutMs)
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+    }
+    synchronized(queueLock) {
+      writerThread = null
+      pendingQueue.clear()
+      freePackets.clear()
+      freeVideoBuffers.clear()
+      freeAudioBuffers.clear()
+      freeVideoBufferBytes = 0L
+      queuedVideoBufferBytes = 0L
+      inFlightVideoCount = 0
+      inFlightAudioCount = 0
+    }
+  }
+
+  private fun drainLoop() {
+    runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY) }
+    while (true) {
+      var packet: QueuedPacket? = null
+      synchronized(queueLock) {
+        while (!closing && !sinkReady) {
+          try {
+            queueLock.wait()
+          } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return
+          }
+        }
+        if (closing && !sinkReady) {
+          return
+        }
+        while (pendingQueue.isEmpty() && !closing) {
+          try {
+            queueLock.wait()
+          } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return
+          }
+        }
+        if (pendingQueue.isEmpty() && closing) {
+          return
+        }
+        packet = pendingQueue.removeFirst()
+        diagnostics?.onMuxerDequeued(pendingQueue.size)
+      }
+
+      val active = packet ?: continue
+      val buf = active.buffer
+      if (buf != null) {
+        sink.onWriteSample(active.isVideo, buf, active.size, active.ptsUs, active.flags)
+      }
+
+      synchronized(queueLock) {
+        releaseSlotAndBufferLocked(active.isVideo, buf, countVideoBytes = true)
+        active.buffer = null
+        freePackets.addLast(active)
+        queueLock.notifyAll()
+      }
+    }
+  }
+
+  private fun popReusableBufferLocked(isVideo: Boolean, minCapacity: Int): ByteBuffer? {
+    if (!isVideo) {
+      val buf = freeAudioBuffers.pollFirst()
+      if (buf != null && buf.capacity() >= minCapacity) return buf
+      // If free audio buffer was too small, discard it and try the next, or let caller allocate
+      return null
+    }
+
+    if (freeVideoBuffers.isEmpty()) return null
+
+    // Find first buffer large enough; otherwise drop oldest smaller buffer if byte budget is tight
+    val iterator = freeVideoBuffers.iterator()
+    while (iterator.hasNext()) {
+      val candidate = iterator.next()
+      if (candidate.capacity() >= minCapacity) {
+        iterator.remove()
+        freeVideoBufferBytes -= candidate.capacity().toLong()
+        return candidate
+      }
+    }
+
+    // No buffer large enough; trim pool entries if adding a larger buffer would exceed byte cap
+    while (
+      freeVideoBuffers.isNotEmpty() &&
+        queuedVideoBufferBytes + freeVideoBufferBytes + minCapacity > maxVideoPoolBytes
+    ) {
+      val evicted = freeVideoBuffers.removeFirst()
+      freeVideoBufferBytes -= evicted.capacity().toLong()
+    }
+    return null
+  }
+
+  private fun releaseSlotAndBufferLocked(
+    isVideo: Boolean,
+    buffer: ByteBuffer?,
+    countVideoBytes: Boolean,
+  ) {
+    if (isVideo) {
+      inFlightVideoCount = (inFlightVideoCount - 1).coerceAtLeast(0)
+      if (buffer != null) {
+        val cap = buffer.capacity().toLong()
+        if (countVideoBytes) {
+          queuedVideoBufferBytes = (queuedVideoBufferBytes - cap).coerceAtLeast(0L)
+        }
+        if (
+          !closing &&
+            freeVideoBuffers.size < maxVideoPackets &&
+            queuedVideoBufferBytes + freeVideoBufferBytes + cap <= maxVideoPoolBytes
+        ) {
+          freeVideoBuffers.addLast(buffer)
+          freeVideoBufferBytes += cap
+        }
+      }
+    } else {
+      inFlightAudioCount = (inFlightAudioCount - 1).coerceAtLeast(0)
+      if (!closing && buffer != null && freeAudioBuffers.size < maxAudioPackets) {
+        freeAudioBuffers.addLast(buffer)
+      }
+    }
+  }
+
+  private fun roundUpToBlock(size: Int, blockBytes: Int): Int {
+    val rem = size % blockBytes
+    return if (rem == 0) size else size + (blockBytes - rem)
+  }
+
+  companion object {
+    const val DEFAULT_MAX_VIDEO_PACKETS = 24
+    const val DEFAULT_MAX_AUDIO_PACKETS = 96
+    const val DEFAULT_MAX_VIDEO_POOL_BYTES = 40L * 1024L * 1024L
+    private const val VIDEO_BUFFER_ALIGN_BYTES = 65_536
+    private const val DEFAULT_AUDIO_BUFFER_BYTES = 8_192
+  }
+}
+
+/**
  * Thread-safe native android.media.MediaMuxer coordinator writing Standard MP4 directly to
- * MediaStore (Movies/FrameCut). Normalizes video and audio presentation timestamps from 0L so
- * every recording starts cleanly at 00:00:00.
+ * MediaStore (Movies/FrameCut). Uses a bounded zero-GC async MuxerPacketQueue so MediaCodec
+ * output buffers are released in microseconds without blocking on flash/FUSE storage writes.
  */
 class MediaMuxerManager(
   private val context: Context,
   private val expectAudioTrackInitial: Boolean,
+  private val diagnostics: RecordingDiagnostics? = null,
 ) {
-  private val lock = Any()
+  private val lock = Object()
   private var mediaMuxer: MediaMuxer? = null
   private var parcelFd: ParcelFileDescriptor? = null
   private var outputUri: Uri? = null
@@ -36,15 +348,22 @@ class MediaMuxerManager(
   private var videoTrackIndex = -1
   private var audioTrackIndex = -1
   private var expectAudio = expectAudioTrackInitial
-  private var muxerStarted = false
+  @Volatile private var muxerStarted = false
+  @Volatile private var isReleased = false
+
+  // Accessed exclusively by the single FrameCut-MuxerWriter thread after start
   private var videoFramesWritten = 0L
   private var videoStartPresentationTimeUs = -1L
   private var audioStartPresentationTimeUs = -1L
   private var lastVideoPtsUs = -1L
   private var lastAudioPtsUs = -1L
-  private var isReleased = false
   private val reusableVideoInfo = MediaCodec.BufferInfo()
   private val reusableAudioInfo = MediaCodec.BufferInfo()
+
+  private val packetQueue =
+    MuxerPacketQueue(diagnostics = diagnostics) { isVideo, buffer, size, ptsUs, flags ->
+      writeQueuedPacketOnWriterThread(isVideo, buffer, size, ptsUs, flags)
+    }
 
   fun prepare(): MuxerOutput {
     synchronized(lock) {
@@ -74,6 +393,7 @@ class MediaMuxerManager(
       outputUri = uri
       parcelFd = pfd
       mediaMuxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+      packetQueue.start()
       return MuxerOutput(uri = uri, displayName = displayName)
     }
   }
@@ -108,9 +428,10 @@ class MediaMuxerManager(
     }
   }
 
-  fun isStarted(): Boolean = synchronized(lock) { muxerStarted }
+  fun isStarted(): Boolean = muxerStarted
 
   fun awaitStarted(timeoutMs: Long = 2500L): Boolean {
+    if (muxerStarted) return true
     synchronized(lock) {
       if (muxerStarted) return true
       if (isReleased) return false
@@ -119,7 +440,7 @@ class MediaMuxerManager(
         val remaining = deadline - System.currentTimeMillis()
         if (remaining <= 0L) break
         try {
-          (lock as Object).wait(remaining)
+          lock.wait(remaining)
         } catch (_: InterruptedException) {
           Thread.currentThread().interrupt()
           break
@@ -137,7 +458,8 @@ class MediaMuxerManager(
     if (videoReady && audioReady) {
       muxer.start()
       muxerStarted = true
-      (lock as Object).notifyAll()
+      packetQueue.markSinkReady()
+      lock.notifyAll()
       Log.d(
         TAG,
         "Standard MP4 MediaMuxer started (videoTrack=$videoTrackIndex, audioTrack=$audioTrackIndex)",
@@ -146,55 +468,94 @@ class MediaMuxerManager(
   }
 
   fun writeVideoSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-    synchronized(lock) {
-      if (!muxerStarted || isReleased || videoTrackIndex == -1) return
-      if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
-      if (info.size <= 0) return
+    if (isReleased) return
+    if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
+    if (info.size <= 0) return
+    packetQueue.submit(
+      isVideo = true,
+      source = buffer,
+      offset = info.offset,
+      size = info.size,
+      ptsUs = info.presentationTimeUs,
+      flags = info.flags,
+    )
+  }
 
+  fun writeAudioSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
+    if (isReleased || !expectAudio) return
+    if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
+    if (info.size <= 0) return
+    packetQueue.submit(
+      isVideo = false,
+      source = buffer,
+      offset = info.offset,
+      size = info.size,
+      ptsUs = info.presentationTimeUs,
+      flags = info.flags,
+    )
+  }
+
+  private fun writeQueuedPacketOnWriterThread(
+    isVideo: Boolean,
+    buffer: ByteBuffer,
+    size: Int,
+    rawPtsUs: Long,
+    flags: Int,
+  ) {
+    val muxer = mediaMuxer ?: return
+    if (!muxerStarted || isReleased) return
+
+    if (isVideo) {
+      if (videoTrackIndex == -1) return
       if (videoStartPresentationTimeUs < 0L) {
-        videoStartPresentationTimeUs = info.presentationTimeUs
+        videoStartPresentationTimeUs = rawPtsUs
       }
       val normalizedPtsUs =
         normalizePresentationTimeUs(
-          rawPtsUs = info.presentationTimeUs,
+          rawPtsUs = rawPtsUs,
           anchorPtsUs = videoStartPresentationTimeUs,
           lastWrittenPtsUs = lastVideoPtsUs,
         )
       lastVideoPtsUs = normalizedPtsUs
 
-      reusableVideoInfo.set(info.offset, info.size, normalizedPtsUs, info.flags)
-      buffer.position(reusableVideoInfo.offset)
-      buffer.limit(reusableVideoInfo.offset + reusableVideoInfo.size)
+      reusableVideoInfo.set(0, size, normalizedPtsUs, flags)
+      buffer.position(0)
+      buffer.limit(size)
+      val writeStartNs = SystemClock.elapsedRealtimeNanos()
       runCatching {
-          mediaMuxer?.writeSampleData(videoTrackIndex, buffer, reusableVideoInfo)
+          muxer.writeSampleData(videoTrackIndex, buffer, reusableVideoInfo)
           videoFramesWritten++
+          diagnostics?.onMuxerSampleWritten(size, SystemClock.elapsedRealtimeNanos() - writeStartNs)
         }
-        .onFailure { Log.e(TAG, "writeVideoSample failed", it) }
-    }
-  }
-
-  fun writeAudioSample(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-    synchronized(lock) {
-      if (!muxerStarted || isReleased || audioTrackIndex == -1) return
-      if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
-      if (info.size <= 0) return
-
+        .onFailure {
+          diagnostics?.onMuxerError()
+          Log.e(TAG, "writeVideoSample failed", it)
+        }
+    } else {
+      if (audioTrackIndex == -1) return
       if (audioStartPresentationTimeUs < 0L) {
-        audioStartPresentationTimeUs = info.presentationTimeUs
+        audioStartPresentationTimeUs = rawPtsUs
       }
       val normalizedPtsUs =
         normalizePresentationTimeUs(
-          rawPtsUs = info.presentationTimeUs,
+          rawPtsUs = rawPtsUs,
           anchorPtsUs = audioStartPresentationTimeUs,
           lastWrittenPtsUs = lastAudioPtsUs,
         )
       lastAudioPtsUs = normalizedPtsUs
 
-      reusableAudioInfo.set(info.offset, info.size, normalizedPtsUs, info.flags)
-      buffer.position(reusableAudioInfo.offset)
-      buffer.limit(reusableAudioInfo.offset + reusableAudioInfo.size)
-      runCatching { mediaMuxer?.writeSampleData(audioTrackIndex, buffer, reusableAudioInfo) }
-        .onFailure { Log.e(TAG, "writeAudioSample failed", it) }
+      reusableAudioInfo.set(0, size, normalizedPtsUs, flags)
+      buffer.position(0)
+      buffer.limit(size)
+      val writeStartNs = SystemClock.elapsedRealtimeNanos()
+      runCatching {
+          muxer.writeSampleData(audioTrackIndex, buffer, reusableAudioInfo)
+          diagnostics?.onMuxerSampleWritten(size, SystemClock.elapsedRealtimeNanos() - writeStartNs)
+        }
+        .onFailure {
+          diagnostics?.onMuxerError()
+          Log.e(TAG, "writeAudioSample failed", it)
+        }
     }
   }
 
@@ -202,15 +563,21 @@ class MediaMuxerManager(
     synchronized(lock) {
       if (isReleased) return null
       isReleased = true
-      (lock as Object).notifyAll()
-      var validOutput = false
+      lock.notifyAll()
+    }
 
+    // Drain every already-queued frame cleanly to MediaMuxer before calling stop()
+    packetQueue.closeAndDrain()
+
+    synchronized(lock) {
+      var validOutput = false
       try {
         if (muxerStarted && videoFramesWritten > 0) {
           mediaMuxer?.stop()
           validOutput = true
         }
       } catch (e: Exception) {
+        diagnostics?.onMuxerError()
         Log.e(TAG, "Error stopping MediaMuxer", e)
       } finally {
         runCatching { mediaMuxer?.release() }

@@ -8,9 +8,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import com.example.diagnostics.RecordingDiagnostics
 import com.example.muxer.MediaMuxerManager
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
@@ -54,6 +56,7 @@ class VideoEncoder(
   private val colorDepth: ColorDepthOption = ColorDepthOption.BIT_8,
   private val colorRange: ColorRangeOption = ColorRangeOption.LIMITED,
   private val gopInterval: GopIntervalOption = GopIntervalOption.SEC_1,
+  private val diagnostics: RecordingDiagnostics? = null,
 ) {
   private var mediaCodec: MediaCodec? = null
   private var inputSurface: Surface? = null
@@ -82,13 +85,24 @@ class VideoEncoder(
           MediaCodec.createEncoderByType(InternalRecordingConfig.VIDEO_MIME_TYPE)
         }
 
-    val cbThread = HandlerThread("FrameCut-VideoAsync").apply { start() }
+    val cbThread =
+      HandlerThread("FrameCut-VideoAsync", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply { start() }
     callbackThread = cbThread
     val cbHandler = Handler(cbThread.looper)
     codec.setCallback(createAsyncCallback(), cbHandler)
 
     selected = configureHevcWithFallback(codec, selected)
     selection = selected
+
+    val perfSupported = checkPerformancePointSupport(codec.codecInfo, selected, fpsOption.fps)
+    diagnostics?.configureEncoder(
+      codecName = selected.codecName,
+      isHardwareAccelerated = selected.isHardwareAccelerated,
+      performancePointSupported = perfSupported,
+      width = selected.alignedWidth,
+      height = selected.alignedHeight,
+      bitrateBps = selected.effectiveBitrateBps,
+    )
 
     inputSurface = codec.createInputSurface()
     codec.start()
@@ -100,8 +114,9 @@ class VideoEncoder(
       "VideoEncoder started: codec=${selected.codecName} (H.265/HEVC), " +
         "mode=AsyncSurface, depth=${colorDepth.label}, std=BT.709(SDR), " +
         "range=${colorRange.label}, bitrateMode=${bitrateMode.label}, gop=${gopInterval.label}, " +
-        "fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, chipset=${selected.chipsetFamily}, " +
-        "size=${selected.alignedWidth}x${selected.alignedHeight}, bitrate=${selected.effectiveBitrateBps / 1_000_000}Mbps",
+        "fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, perfPoint=$perfSupported, " +
+        "chipset=${selected.chipsetFamily}, size=${selected.alignedWidth}x${selected.alignedHeight}, " +
+        "bitrate=${selected.effectiveBitrateBps / 1_000_000}Mbps",
     )
     return selected
   }
@@ -112,7 +127,7 @@ class VideoEncoder(
   ): EncoderSelection {
     var selected = initialSelection
 
-    // Primary format built strictly from user selections + fixed BT.709 (SDR)
+    // Primary format built strictly from user selections + fixed BT.709 (SDR) + realtime hints
     val primaryFormat =
       buildHevcFormat(
         codecInfo = codec.codecInfo,
@@ -121,15 +136,34 @@ class VideoEncoder(
         requestedRange = colorRange.mediaFormatRange,
         requestedGop = gopInterval,
         requestedBitrateMode = bitrateMode,
+        includeRealtimeRateHints = true,
       )
     try {
       codec.configure(primaryFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
       return selected
     } catch (e: Exception) {
+      Log.w(TAG, "Primary HEVC format with operating rate hints rejected; retrying user settings", e)
+    }
+
+    // Fallback 1a: Keep all exact user settings without operating-rate / max-B-frames hints
+    val userSettingsSafeFormat =
+      buildHevcFormat(
+        codecInfo = codec.codecInfo,
+        selected = selected,
+        use10Bit = colorDepth == ColorDepthOption.BIT_10,
+        requestedRange = colorRange.mediaFormatRange,
+        requestedGop = gopInterval,
+        requestedBitrateMode = bitrateMode,
+        includeRealtimeRateHints = false,
+      )
+    try {
+      codec.configure(userSettingsSafeFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      return selected
+    } catch (e: Exception) {
       Log.w(TAG, "Primary HEVC format rejected; trying compatible hardware fallback", e)
     }
 
-    // Fallback 1: Keep depth, clamp range to LIMITED and GOP to 1s integer
+    // Fallback 1b: Keep depth, clamp range to LIMITED and GOP to 1s integer
     val rangeFallbackFormat =
       buildHevcFormat(
         codecInfo = codec.codecInfo,
@@ -138,6 +172,7 @@ class VideoEncoder(
         requestedRange = MediaFormat.COLOR_RANGE_LIMITED,
         requestedGop = GopIntervalOption.SEC_1,
         requestedBitrateMode = BitrateModeOption.VBR,
+        includeRealtimeRateHints = false,
       )
     try {
       codec.configure(rangeFallbackFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -155,6 +190,7 @@ class VideoEncoder(
         requestedRange = MediaFormat.COLOR_RANGE_LIMITED,
         requestedGop = GopIntervalOption.SEC_1,
         requestedBitrateMode = BitrateModeOption.VBR,
+        includeRealtimeRateHints = false,
       )
     try {
       codec.configure(safe8BitFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -173,6 +209,7 @@ class VideoEncoder(
             setInteger(MediaFormat.KEY_BIT_RATE, selected.effectiveBitrateBps)
             setInteger(MediaFormat.KEY_FRAME_RATE, fpsOption.fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, InternalRecordingConfig.I_FRAME_INTERVAL_SECONDS)
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
             setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
             setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
             setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
@@ -189,6 +226,7 @@ class VideoEncoder(
     requestedRange: Int,
     requestedGop: GopIntervalOption,
     requestedBitrateMode: BitrateModeOption,
+    includeRealtimeRateHints: Boolean,
   ): MediaFormat {
     return MediaFormat.createVideoFormat(
         InternalRecordingConfig.VIDEO_MIME_TYPE,
@@ -200,6 +238,11 @@ class VideoEncoder(
         setInteger(MediaFormat.KEY_BIT_RATE, selected.effectiveBitrateBps)
         setInteger(MediaFormat.KEY_FRAME_RATE, fpsOption.fps)
         setInteger(MediaFormat.KEY_CAPTURE_RATE, fpsOption.fps)
+        setInteger(MediaFormat.KEY_PRIORITY, 0)
+        if (includeRealtimeRateHints) {
+          setInteger(MediaFormat.KEY_OPERATING_RATE, fpsOption.fps)
+          setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+        }
         if (requestedGop == GopIntervalOption.SEC_0_5) {
           setFloat(MediaFormat.KEY_I_FRAME_INTERVAL, requestedGop.secondsFloat)
         } else {
@@ -222,6 +265,23 @@ class VideoEncoder(
       }
   }
 
+  private fun checkPerformancePointSupport(
+    codecInfo: MediaCodecInfo,
+    selected: EncoderSelection,
+    fps: Int,
+  ): Boolean? {
+    val videoCaps =
+      runCatching {
+          codecInfo.getCapabilitiesForType(InternalRecordingConfig.VIDEO_MIME_TYPE)?.videoCapabilities
+        }
+        .getOrNull() ?: return null
+    val points = videoCaps.supportedPerformancePoints ?: return null
+    if (points.isEmpty()) return false
+    val targetPoint =
+      MediaCodecInfo.VideoCapabilities.PerformancePoint(selected.alignedWidth, selected.alignedHeight, fps)
+    return points.any { it.covers(targetPoint) }
+  }
+
   private fun createAsyncCallback(): MediaCodec.Callback {
     var formatAdded = false
     return object : MediaCodec.Callback() {
@@ -239,19 +299,26 @@ class VideoEncoder(
         index: Int,
         info: MediaCodec.BufferInfo,
       ) {
+        val cbStartNs = SystemClock.elapsedRealtimeNanos()
+        var wroteSample = false
         try {
+          val isConfig = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
           val encodedData = codec.getOutputBuffer(index)
-          if (
-            encodedData != null &&
-              info.size > 0 &&
-              (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
-          ) {
-            if (muxerManager.isStarted() || muxerManager.awaitStarted(2500L)) {
-              muxerManager.writeVideoSample(encodedData, info)
-            }
+          if (encodedData != null && info.size > 0 && !isConfig) {
+            muxerManager.writeVideoSample(encodedData, info)
+            wroteSample = true
           }
           codec.releaseOutputBuffer(index, false)
+          if (wroteSample) {
+            diagnostics?.onVideoOutputFrame(
+              rawPtsUs = info.presentationTimeUs,
+              byteSize = info.size,
+              callbackDurationNs = SystemClock.elapsedRealtimeNanos() - cbStartNs,
+              isKeyFrame = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0,
+            )
+          }
         } catch (e: Exception) {
+          diagnostics?.onCodecError()
           Log.w(TAG, "Async output buffer processing error", e)
         }
         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
@@ -260,6 +327,7 @@ class VideoEncoder(
       }
 
       override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+        diagnostics?.onCodecError()
         Log.e(TAG, "Async MediaCodec error", e)
         asyncEosLatch.countDown()
       }
@@ -273,6 +341,7 @@ class VideoEncoder(
     if (paused) {
       isPaused = true
       pauseStartUs = nowUs
+      diagnostics?.onPauseStateChanged(true)
       runCatching {
         codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_SUSPEND, 1) })
       }
@@ -282,9 +351,11 @@ class VideoEncoder(
         pauseStartUs = 0L
       }
       isPaused = false
+      diagnostics?.onPauseStateChanged(false)
       runCatching {
         codec.setParameters(
           Bundle().apply {
+            putInt(MediaFormat.KEY_PRIORITY, 0)
             putInt(MediaCodec.PARAMETER_KEY_SUSPEND, 0)
             putLong(MediaCodec.PARAMETER_KEY_OFFSET_TIME, -totalPausedUs)
           },

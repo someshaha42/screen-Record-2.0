@@ -6,6 +6,7 @@ import android.hardware.display.VirtualDisplay
 import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Process
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
@@ -80,7 +81,8 @@ class ScreenCaptureManager(
     currentCaptureHeight = outputHeight.coerceAtLeast(128)
     currentDensityDpi = dpi
 
-    val thread = HandlerThread("FrameCut-CaptureCallbacks").apply { start() }
+    val thread =
+      HandlerThread("FrameCut-CaptureCallbacks", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
     callbackThread = thread
     val handler = Handler(thread.looper)
     callbackHandler = handler

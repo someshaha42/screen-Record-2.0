@@ -24,6 +24,7 @@ import com.example.R
 import com.example.audio.AudioCaptureManager
 import com.example.capture.ScreenCaptureManager
 import com.example.compat.PlatformCompat
+import com.example.diagnostics.RecordingDiagnostics
 import com.example.encoder.EncoderSelection
 import com.example.encoder.VideoEncoder
 import com.example.muxer.MediaMuxerManager
@@ -109,6 +110,7 @@ class RecordingService : Service() {
   @Volatile private var videoEncoder: VideoEncoder? = null
   @Volatile private var audioCaptureManager: AudioCaptureManager? = null
   @Volatile private var screenCaptureManager: ScreenCaptureManager? = null
+  @Volatile private var diagnostics: RecordingDiagnostics? = null
   private var overlayManager: RegionOverlayManager? = null
   @Volatile private var activeMediaProjection: MediaProjection? = null
 
@@ -368,10 +370,14 @@ class RecordingService : Service() {
           PackageManager.PERMISSION_GRANTED
       val expectAudio = hasAudioPermission
 
+      val sessionDiagnostics = RecordingDiagnostics(targetFps = settings.videoFps.fps)
+      diagnostics = sessionDiagnostics
+
       val muxer =
         MediaMuxerManager(
           context = this,
           expectAudioTrackInitial = expectAudio,
+          diagnostics = sessionDiagnostics,
         )
       muxer.prepare()
       muxerManager = muxer
@@ -387,6 +393,7 @@ class RecordingService : Service() {
           colorDepth = settings.colorDepth,
           colorRange = settings.colorRange,
           gopInterval = settings.gopInterval,
+          diagnostics = sessionDiagnostics,
         )
       val selection: EncoderSelection = encoder.prepare()
       videoEncoder = encoder
@@ -398,6 +405,7 @@ class RecordingService : Service() {
           audioFormatOption = settings.audioFormat,
           mediaProjection = mediaProjection,
           muxerManager = muxer,
+          diagnostics = sessionDiagnostics,
           onStatusChanged = { status ->
             RecordingSessionStore.update {
               it.copy(
@@ -567,7 +575,11 @@ class RecordingService : Service() {
       runCatching { muxerManager?.finishAndRelease() }
         .onFailure { Log.e(TAG, "Error finalizing MediaMuxerManager", it) }
         .getOrNull()
-        .also { muxerManager = null }
+        .also {
+          muxerManager = null
+          runCatching { diagnostics?.logFinalSummary(this) }
+          diagnostics = null
+        }
     }
 
   private fun startTimerLoop() {
@@ -585,6 +597,9 @@ class RecordingService : Service() {
               if (currentSecond != lastEmittedSecond) {
                 lastEmittedSecond = currentSecond
                 RecordingSessionStore.update { it.copy(elapsedMillis = elapsed) }
+                if (currentSecond > 0L && currentSecond % DIAGNOSTICS_SUMMARY_INTERVAL_SECONDS == 0L) {
+                  diagnostics?.logPeriodicSummary(this@RecordingService)
+                }
               }
               val nextTickDelayMs = (1000L - (elapsed % 1000L)).coerceIn(50L, 1000L)
               delay(nextTickDelayMs)
@@ -711,6 +726,7 @@ class RecordingService : Service() {
     private const val TAG = "RecordingService"
     private const val CHANNEL_ID = "framecut_recording_channel"
     private const val NOTIFICATION_ID = 4102
+    private const val DIAGNOSTICS_SUMMARY_INTERVAL_SECONDS = 10L
 
     const val ACTION_START = "com.example.service.ACTION_START"
     const val ACTION_PAUSE = "com.example.service.ACTION_PAUSE"

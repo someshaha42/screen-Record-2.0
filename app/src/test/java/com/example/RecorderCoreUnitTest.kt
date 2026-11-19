@@ -1,8 +1,10 @@
 package com.example
 
 import android.media.MediaFormat
+import com.example.diagnostics.RecordingDiagnostics
 import com.example.encoder.VideoEncoder
 import com.example.muxer.MediaMuxerManager
+import com.example.muxer.MuxerPacketQueue
 import com.example.region.RegionSelectionManager
 import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
@@ -19,9 +21,12 @@ import com.example.settings.RegionAnimationOption
 import com.example.settings.VideoBitrateOption
 import com.example.settings.VideoFpsOption
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicInteger
 
 class RecorderCoreUnitTest {
 
@@ -169,5 +174,169 @@ class RecorderCoreUnitTest {
     assertTrue(clean.bottom <= 1f)
     assertTrue(clean.right - clean.left >= 0.119f)
     assertTrue(clean.bottom - clean.top >= 0.119f)
+  }
+
+  @Test
+  fun `muxer packet queue preserves all 60fps burst packets, buffers pre-start frames, and reuses pool`() {
+    val diagnostics =
+      RecordingDiagnostics(
+        targetFps = 60,
+        clockMs = { System.nanoTime() / 1_000_000L },
+        cpuTimeMs = { 0L },
+      )
+    val receivedVideoPts = mutableListOf<Long>()
+    val receivedAudioPts = mutableListOf<Long>()
+    val receivedPayloads = mutableListOf<Int>()
+    val writeCounter = AtomicInteger(0)
+
+    val queue =
+      MuxerPacketQueue(
+        diagnostics = diagnostics,
+        maxVideoPackets = 8,
+        maxAudioPackets = 16,
+        maxVideoPoolBytes = 2L * 1024L * 1024L,
+      ) { isVideo, buffer, size, ptsUs, _ ->
+        val seq = writeCounter.incrementAndGet()
+        if (seq % 15 == 0) {
+          Thread.sleep(3L) // Simulate periodic FUSE/UFS storage flush stall
+        }
+        val firstInt = if (size >= 4) buffer.getInt(0) else -1
+        synchronized(receivedVideoPts) {
+          if (isVideo) {
+            receivedVideoPts.add(ptsUs)
+            receivedPayloads.add(firstInt)
+          } else {
+            receivedAudioPts.add(ptsUs)
+          }
+        }
+      }
+
+    queue.start()
+
+    // Submit 5 early video frames BEFORE sink is ready (e.g., while AudioRecord finishes init)
+    val videoBuf = ByteBuffer.allocateDirect(4096)
+    val audioBuf = ByteBuffer.allocateDirect(512)
+    for (i in 0 until 5) {
+      videoBuf.clear()
+      videoBuf.putInt(i)
+      videoBuf.position(0)
+      videoBuf.limit(1024)
+      assertTrue(queue.submit(true, videoBuf, 0, 1024, i * 16_667L, 0))
+    }
+
+    // Mark sink ready after initial frames were already queued
+    queue.markSinkReady()
+
+    // Submit remaining 115 video frames + 60 audio packets in a burst
+    for (i in 5 until 120) {
+      videoBuf.clear()
+      videoBuf.putInt(i)
+      videoBuf.position(0)
+      videoBuf.limit(1024)
+      assertTrue(queue.submit(true, videoBuf, 0, 1024, i * 16_667L, 0))
+      if (i % 2 == 0) {
+        audioBuf.clear()
+        audioBuf.putInt(i)
+        audioBuf.position(0)
+        audioBuf.limit(256)
+        assertTrue(queue.submit(false, audioBuf, 0, 256, i * 16_667L, 0))
+      }
+    }
+
+    queue.closeAndDrain(timeoutMs = 5000L)
+
+    assertEquals(120, receivedVideoPts.size)
+    assertEquals(57, receivedAudioPts.size)
+    assertEquals((0 until 120).toList(), receivedPayloads)
+    assertEquals((0 until 120).map { it * 16_667L }, receivedVideoPts)
+
+    val snap = diagnostics.snapshot()
+    // Bounded pool reused direct buffers across 178 total packets without per-frame allocation
+    assertTrue(
+      "Expected pool allocations (${snap.muxerPoolAllocations}) to stay bounded <= 24",
+      snap.muxerPoolAllocations <= 24L,
+    )
+  }
+
+  @Test
+  fun `muxer packet queue closes cleanly without deadlock if stopped before sink becomes ready`() {
+    val queue =
+      MuxerPacketQueue(maxVideoPackets = 4, maxAudioPackets = 4) { _, _, _, _, _ -> }
+    queue.start()
+    val buf = ByteBuffer.allocateDirect(256)
+    assertTrue(queue.submit(true, buf, 0, 128, 0L, 0))
+    queue.closeAndDrain(timeoutMs = 1000L)
+    assertFalse(queue.submit(true, buf, 0, 128, 16_667L, 0))
+  }
+
+  @Test
+  fun `recording diagnostics computes 60fps intervals, pause-excluded drops, queue peaks, and errors`() {
+    var fakeClockMs = 1_000L
+    var fakeCpuMs = 100L
+    val diag =
+      RecordingDiagnostics(
+        targetFps = 60,
+        clockMs = { fakeClockMs },
+        cpuTimeMs = { fakeCpuMs },
+      )
+    diag.configureEncoder(
+      codecName = "c2.qti.hevc.encoder",
+      isHardwareAccelerated = true,
+      performancePointSupported = true,
+      width = 1080,
+      height = 2400,
+      bitrateBps = 150_000_000,
+    )
+
+    // 60 steady frames at ~16.667ms (1000ms active)
+    var ptsUs = 0L
+    for (i in 0 until 60) {
+      diag.onVideoOutputFrame(
+        rawPtsUs = ptsUs,
+        byteSize = 250_000,
+        callbackDurationNs = 180_000L, // 180 us
+        isKeyFrame = i == 0,
+      )
+      ptsUs += 16_667L
+    }
+    diag.onAudioOutputPacket(rawPtsUs = 980_000L)
+    diag.onMuxerQueued(5)
+    diag.onMuxerQueued(11)
+    diag.onMuxerDequeued(4)
+    diag.onMuxerSampleWritten(byteSize = 250_000, writeDurationNs = 2_400_000L)
+
+    // Pause for 5 seconds and jump PTS by 5s -> must NOT count as dropped frames
+    diag.onPauseStateChanged(true)
+    fakeClockMs += 5_000L
+    ptsUs += 5_000_000L
+    diag.onPauseStateChanged(false)
+
+    // Resume steady frame + 1 delayed frame interval (50ms -> 3x 16.667ms -> 2 estimated drops)
+    fakeClockMs += 1_000L
+    fakeCpuMs += 220L
+    diag.onVideoOutputFrame(rawPtsUs = ptsUs, byteSize = 240_000, callbackDurationNs = 220_000L, isKeyFrame = false)
+    ptsUs += 50_000L
+    diag.onVideoOutputFrame(rawPtsUs = ptsUs, byteSize = 240_000, callbackDurationNs = 200_000L, isKeyFrame = false)
+
+    diag.onCodecError()
+    diag.onAudioError()
+
+    val snap = diag.snapshot()
+    assertEquals(62L, snap.videoOutputFrames)
+    assertEquals(1L, snap.videoKeyFrames)
+    assertEquals(1L, snap.audioPackets)
+    assertEquals(1L, snap.delayedFrameIntervals)
+    assertEquals(2L, snap.estimatedDroppedFrames)
+    assertEquals(11, snap.muxerQueueDepthPeak)
+    assertEquals(4, snap.muxerQueueDepthCurrent)
+    assertEquals(250_000L, snap.totalBytesWritten)
+    assertEquals(1L, snap.codecErrors)
+    assertEquals(1L, snap.audioErrors)
+    assertEquals(0L, snap.muxerErrors)
+    assertEquals(220L, snap.cpuTimeDeltaMs)
+    assertEquals(1_000L, snap.activeElapsedMs)
+    assertEquals(true, snap.performancePointSupported)
+    assertTrue(snap.avgEncoderCallbackUs in 180L..220L)
+    assertEquals(2_400L, snap.maxMuxerWriteUs)
   }
 }

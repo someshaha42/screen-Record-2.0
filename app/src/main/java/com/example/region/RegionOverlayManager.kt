@@ -130,7 +130,7 @@ internal class RegionBorderOverlayView(
   private val dashPeriod = dashLength + gapLength
 
   private val dashIntervals = floatArrayOf(dashLength, gapLength)
-  private val phaseSteps = 24
+  private val phaseSteps = 16
   private val dashEffects =
     Array(phaseSteps) { step ->
       val stepPhase = -(step.toFloat() / phaseSteps) * dashPeriod
@@ -182,13 +182,19 @@ internal class RegionBorderOverlayView(
   private val windowLocation = IntArray(2)
   private val drawRect = RectF()
   private val badgeRect = RectF()
+  private var clipL = 0f
+  private var clipT = 0f
+  private var clipR = 0f
+  private var clipB = 0f
+  private var hasBadge = false
+  private var geometryReady = false
   private var animator: ValueAnimator? = null
 
   fun startAnimation() {
     if (animator != null) return
     animator =
       ValueAnimator.ofInt(0, phaseSteps).apply {
-        duration = 700L
+        duration = 800L
         repeatCount = ValueAnimator.INFINITE
         repeatMode = ValueAnimator.RESTART
         interpolator = LinearInterpolator()
@@ -215,6 +221,7 @@ internal class RegionBorderOverlayView(
       badgePaint.color = Color.rgb(185, 28, 28)
       animator?.resume()
     }
+    updateGeometry()
     invalidate()
   }
 
@@ -224,8 +231,20 @@ internal class RegionBorderOverlayView(
     animator = null
   }
 
-  override fun onDraw(canvas: Canvas) {
-    super.onDraw(canvas)
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    geometryReady = false
+  }
+
+  override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+    super.onLayout(changed, left, top, right, bottom)
+    if (changed || !geometryReady) {
+      updateGeometry()
+    }
+  }
+
+  private fun updateGeometry() {
+    if (width <= 0 || height <= 0) return
     getLocationOnScreen(windowLocation)
     val offsetX = windowLocation[0].toFloat()
     val offsetY = windowLocation[1].toFloat()
@@ -244,38 +263,53 @@ internal class RegionBorderOverlayView(
       localRight + outwardOffset,
       localBottom + outwardOffset,
     )
+    clipL = localLeft - safetyGapPx
+    clipT = localTop - safetyGapPx
+    clipR = localRight + safetyGapPx
+    clipB = localBottom + safetyGapPx
+
+    val labelW = if (paused) pausedBadgeWidth else recBadgeWidth
+    val outerStrokeEdgeTop = drawRect.top - halfOuterStroke
+    val outerStrokeEdgeBottom = drawRect.bottom + halfOuterStroke
+
+    val badgeTop =
+      when {
+        outerStrokeEdgeTop - labelHeight - badgeGap >= 0f ->
+          outerStrokeEdgeTop - labelHeight - badgeGap
+        outerStrokeEdgeBottom + labelHeight + badgeGap <= height ->
+          outerStrokeEdgeBottom + badgeGap
+        else -> null
+      }
+
+    if (badgeTop != null) {
+      val badgeLeft =
+        drawRect.left.coerceIn(edgeMargin, (width - labelW - edgeMargin).coerceAtLeast(edgeMargin))
+      badgeRect.set(badgeLeft, badgeTop, badgeLeft + labelW, badgeTop + labelHeight)
+      hasBadge = true
+    } else {
+      hasBadge = false
+    }
+
+    geometryReady = true
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    super.onDraw(canvas)
+    if (!geometryReady) {
+      updateGeometry()
+    }
+    if (!geometryReady) return
 
     val saveCount = canvas.save()
     try {
       // Hard-exclude the entire recorded crop area + safety margin from receiving any draw pixels
-      val clipL = localLeft - safetyGapPx
-      val clipT = localTop - safetyGapPx
-      val clipR = localRight + safetyGapPx
-      val clipB = localBottom + safetyGapPx
       canvas.clipOutRect(clipL, clipT, clipR, clipB)
 
       canvas.drawRect(drawRect, backingPaint)
       canvas.drawRect(drawRect, borderPaint)
 
-      val label = if (paused) LABEL_PAUSED else LABEL_RECORDING
-      val labelW = if (paused) pausedBadgeWidth else recBadgeWidth
-      val outerStrokeEdgeTop = drawRect.top - halfOuterStroke
-      val outerStrokeEdgeBottom = drawRect.bottom + halfOuterStroke
-
-      // Draw badge only where it fits cleanly outside the crop rectangle
-      val badgeTop =
-        when {
-          outerStrokeEdgeTop - labelHeight - badgeGap >= 0f ->
-            outerStrokeEdgeTop - labelHeight - badgeGap
-          outerStrokeEdgeBottom + labelHeight + badgeGap <= height ->
-            outerStrokeEdgeBottom + badgeGap
-          else -> null
-        }
-
-      if (badgeTop != null) {
-        val badgeLeft =
-          drawRect.left.coerceIn(edgeMargin, (width - labelW - edgeMargin).coerceAtLeast(edgeMargin))
-        badgeRect.set(badgeLeft, badgeTop, badgeLeft + labelW, badgeTop + labelHeight)
+      if (hasBadge) {
+        val label = if (paused) LABEL_PAUSED else LABEL_RECORDING
         canvas.drawRoundRect(badgeRect, badgeCornerRadius, badgeCornerRadius, badgePaint)
         canvas.drawText(
           label,

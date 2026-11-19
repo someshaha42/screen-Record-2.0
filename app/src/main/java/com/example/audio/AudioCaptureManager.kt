@@ -18,9 +18,11 @@ import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.diagnostics.RecordingDiagnostics
 import com.example.muxer.MediaMuxerManager
 import com.example.settings.AudioFormatOption
 import com.example.settings.AudioSourceOption
@@ -45,6 +47,7 @@ class AudioCaptureManager(
   private val audioFormatOption: AudioFormatOption = AudioFormatOption.MONO_AAC,
   private val mediaProjection: MediaProjection?,
   private val muxerManager: MediaMuxerManager,
+  private val diagnostics: RecordingDiagnostics? = null,
   private val onStatusChanged: (AudioCaptureStatus) -> Unit = {},
 ) {
   private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -130,10 +133,7 @@ class AudioCaptureManager(
       drainThread =
         Thread(::drainEncoderLoop, "FrameCut-AudioDrain").apply { start() }
       captureThread =
-        Thread({ capturePcmLoop(bufferSize) }, "FrameCut-AudioCapture").apply {
-          priority = Thread.MAX_PRIORITY
-          start()
-        }
+        Thread({ capturePcmLoop(bufferSize) }, "FrameCut-AudioCapture").apply { start() }
 
       AudioCaptureStatus(
         isCapturing = true,
@@ -351,6 +351,7 @@ class AudioCaptureManager(
   }
 
   private fun capturePcmLoop(bufferSize: Int) {
+    runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO) }
     val record = audioRecord ?: return
     val encoder = audioEncoder ?: return
     val pcmBuffer = ByteArray(bufferSize.coerceAtMost(8192))
@@ -360,6 +361,7 @@ class AudioCaptureManager(
         try {
           record.read(pcmBuffer, 0, pcmBuffer.size)
         } catch (e: Exception) {
+          diagnostics?.onAudioError()
           Log.e(TAG, "AudioRecord.read error", e)
           break
         }
@@ -437,6 +439,7 @@ class AudioCaptureManager(
   }
 
   private fun drainEncoderLoop() {
+    runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE) }
     val encoder = audioEncoder ?: return
     val bufferInfo = MediaCodec.BufferInfo()
     var trackAdded = false
@@ -446,6 +449,7 @@ class AudioCaptureManager(
         try {
           encoder.dequeueOutputBuffer(bufferInfo, 10_000L)
         } catch (e: Exception) {
+          diagnostics?.onAudioError()
           Log.e(TAG, "Audio encoder dequeueOutputBuffer error", e)
           if (!trackAdded) muxerManager.disableAudioTrack()
           break
@@ -463,14 +467,10 @@ class AudioCaptureManager(
         }
         index >= 0 -> {
           val encoded = encoder.getOutputBuffer(index)
-          if (
-            encoded != null &&
-              bufferInfo.size > 0 &&
-              (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
-          ) {
-            if (muxerManager.isStarted() || muxerManager.awaitStarted(2500L)) {
-              muxerManager.writeAudioSample(encoded, bufferInfo)
-            }
+          val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+          if (encoded != null && bufferInfo.size > 0 && !isConfig) {
+            muxerManager.writeAudioSample(encoded, bufferInfo)
+            diagnostics?.onAudioOutputPacket(bufferInfo.presentationTimeUs)
           }
           encoder.releaseOutputBuffer(index, false)
           if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
