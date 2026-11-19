@@ -38,10 +38,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -110,6 +112,8 @@ import java.util.Locale
 @Composable
 fun MainScreen(
   uiState: RecorderUiState,
+  isDarkTheme: Boolean,
+  onToggleTheme: () -> Unit,
   onStartRecordClick: () -> Unit,
   onPauseResumeClick: () -> Unit,
   onStopClick: () -> Unit,
@@ -162,6 +166,21 @@ fun MainScreen(
           }
         },
         actions = {
+          IconButton(
+            onClick = onToggleTheme,
+            modifier =
+              Modifier.minimumInteractiveComponentSize()
+                .focusRing(shape = CircleShape)
+                .testTag("theme_toggle_button"),
+          ) {
+            Icon(
+              imageVector =
+                if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+              contentDescription =
+                if (isDarkTheme) stringResource(R.string.cd_theme_switch_to_light)
+                else stringResource(R.string.cd_theme_switch_to_dark),
+            )
+          }
           IconButton(
             onClick = onOpenRecordings,
             modifier =

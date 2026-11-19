@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
@@ -55,8 +56,12 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge()
 
     setContent {
-      FrameCutTheme {
+      val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+      val isDarkTheme = uiState.settings.darkThemeOverride ?: isSystemInDarkTheme()
+      FrameCutTheme(darkTheme = isDarkTheme) {
         FrameCutApp(
+          uiState = uiState,
+          isDarkTheme = isDarkTheme,
           viewModel = viewModel,
           onOpenOverlaySettings = { openOptionalOverlaySettings() },
         )
@@ -86,10 +91,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun FrameCutApp(
+  uiState: com.example.ui.RecorderUiState,
+  isDarkTheme: Boolean,
   viewModel: RecorderViewModel,
   onOpenOverlaySettings: () -> Unit,
 ) {
-  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
   val navController = rememberNavController()
   val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -162,6 +168,8 @@ private fun FrameCutApp(
       composable(ROUTE_MAIN) {
         MainScreen(
           uiState = uiState,
+          isDarkTheme = isDarkTheme,
+          onToggleTheme = remember(viewModel, isDarkTheme) { { viewModel.setDarkTheme(!isDarkTheme) } },
           onStartRecordClick = { beginRecordFlow() },
           onPauseResumeClick = remember(viewModel) { viewModel::togglePauseResume },
           onStopClick = remember(viewModel) { viewModel::stopRecording },
@@ -195,8 +203,6 @@ private fun FrameCutApp(
           onSelectBitrateMode = remember(viewModel) { viewModel::setBitrateMode },
           onSelectColorDepth = remember(viewModel) { viewModel::setColorDepth },
           onSelectVideoFps = remember(viewModel) { viewModel::setVideoFps },
-          onSelectColorStandard = remember(viewModel) { viewModel::setColorStandard },
-          onSelectRenderingMode = remember(viewModel) { viewModel::setRenderingMode },
           onSelectGopInterval = remember(viewModel) { viewModel::setGopInterval },
           onSelectColorRange = remember(viewModel) { viewModel::setColorRange },
           onSelectAudioFormat = remember(viewModel) { viewModel::setAudioFormat },

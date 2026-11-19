@@ -37,7 +37,6 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ShutterSpeed
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Update
@@ -71,10 +70,8 @@ import com.example.settings.AudioFormatOption
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
-import com.example.settings.ColorStandardOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.RecordingSettings
-import com.example.settings.RenderingModeOption
 import com.example.settings.VideoFpsOption
 import com.example.ui.theme.LocalStudioColors
 
@@ -87,8 +84,6 @@ fun SettingsScreen(
   onSelectBitrateMode: (BitrateModeOption) -> Unit,
   onSelectColorDepth: (ColorDepthOption) -> Unit,
   onSelectVideoFps: (VideoFpsOption) -> Unit,
-  onSelectColorStandard: (ColorStandardOption) -> Unit,
-  onSelectRenderingMode: (RenderingModeOption) -> Unit,
   onSelectGopInterval: (GopIntervalOption) -> Unit,
   onSelectColorRange: (ColorRangeOption) -> Unit,
   onSelectAudioFormat: (AudioFormatOption) -> Unit,
@@ -192,8 +187,8 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
               ) {
                 ColorDepthCard(settings.colorDepth, isIdle, onSelectColorDepth)
-                ColorStandardCard(settings.colorStandard, isIdle, onSelectColorStandard)
-                RenderingModeCard(settings.renderingMode, isIdle, onSelectRenderingMode)
+                ColorStandardCard()
+                RenderingModeCard()
                 ColorRangeCard(settings.colorRange, isIdle, onSelectColorRange)
                 ChromaSubsamplingCard()
               }
@@ -202,9 +197,9 @@ fun SettingsScreen(
             BitrateModeCard(settings.bitrateMode, isIdle, onSelectBitrateMode)
             ColorDepthCard(settings.colorDepth, isIdle, onSelectColorDepth)
             VideoFpsCard(settings.videoFps, isIdle, onSelectVideoFps)
-            ColorStandardCard(settings.colorStandard, isIdle, onSelectColorStandard)
+            ColorStandardCard()
             OutputContainerCard()
-            RenderingModeCard(settings.renderingMode, isIdle, onSelectRenderingMode)
+            RenderingModeCard()
             GopIntervalCard(settings.gopInterval, isIdle, onSelectGopInterval)
             ColorRangeCard(settings.colorRange, isIdle, onSelectColorRange)
             AudioFormatCard(settings.audioFormat, isIdle, onSelectAudioFormat)
@@ -327,38 +322,22 @@ private fun VideoFpsCard(
 }
 
 @Composable
-private fun ColorStandardCard(
-  selected: ColorStandardOption,
-  enabled: Boolean,
-  onSelect: (ColorStandardOption) -> Unit,
-) {
+private fun ColorStandardCard() {
   PipelineSectionCard(
     title = stringResource(R.string.section_color_standard),
     hint = stringResource(R.string.section_color_standard_hint),
     icon = Icons.Default.HdrOn,
   ) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      PipelineOptionTile(
-        title = stringResource(R.string.color_std_bt709),
-        subtitle = stringResource(R.string.color_std_bt709_desc),
-        icon = Icons.Default.Palette,
-        selected = selected == ColorStandardOption.BT_709,
-        enabled = enabled,
-        testTag = "color_std_bt709",
-        onClick = { onSelect(ColorStandardOption.BT_709) },
-        modifier = Modifier.weight(1f),
-      )
-      PipelineOptionTile(
-        title = stringResource(R.string.color_std_bt2020),
-        subtitle = stringResource(R.string.color_std_bt2020_desc),
-        icon = Icons.Default.HdrOn,
-        selected = selected == ColorStandardOption.BT_2020,
-        enabled = enabled,
-        testTag = "color_std_bt2020",
-        onClick = { onSelect(ColorStandardOption.BT_2020) },
-        modifier = Modifier.weight(1f),
-      )
-    }
+    PipelineOptionTile(
+      title = stringResource(R.string.color_std_bt709),
+      subtitle = stringResource(R.string.color_std_bt709_desc),
+      icon = Icons.Default.Palette,
+      selected = true,
+      enabled = true,
+      testTag = "color_std_bt709_active",
+      onClick = {},
+      modifier = Modifier.fillMaxWidth(),
+    )
   }
 }
 
@@ -383,38 +362,22 @@ private fun OutputContainerCard() {
 }
 
 @Composable
-private fun RenderingModeCard(
-  selected: RenderingModeOption,
-  enabled: Boolean,
-  onSelect: (RenderingModeOption) -> Unit,
-) {
+private fun RenderingModeCard() {
   PipelineSectionCard(
     title = stringResource(R.string.section_rendering_mode),
     hint = stringResource(R.string.section_rendering_mode_hint),
     icon = Icons.Default.Bolt,
   ) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      PipelineOptionTile(
-        title = stringResource(R.string.rendering_async),
-        subtitle = stringResource(R.string.rendering_async_desc),
-        icon = Icons.Default.Bolt,
-        selected = selected == RenderingModeOption.ASYNC_SURFACE,
-        enabled = enabled,
-        testTag = "rendering_async",
-        onClick = { onSelect(RenderingModeOption.ASYNC_SURFACE) },
-        modifier = Modifier.weight(1f),
-      )
-      PipelineOptionTile(
-        title = stringResource(R.string.rendering_direct),
-        subtitle = stringResource(R.string.rendering_direct_desc),
-        icon = Icons.Default.Sync,
-        selected = selected == RenderingModeOption.DIRECT_SURFACE,
-        enabled = enabled,
-        testTag = "rendering_direct",
-        onClick = { onSelect(RenderingModeOption.DIRECT_SURFACE) },
-        modifier = Modifier.weight(1f),
-      )
-    }
+    PipelineOptionTile(
+      title = stringResource(R.string.rendering_async),
+      subtitle = stringResource(R.string.rendering_async_desc),
+      icon = Icons.Default.Bolt,
+      selected = true,
+      enabled = true,
+      testTag = "rendering_async_active",
+      onClick = {},
+      modifier = Modifier.fillMaxWidth(),
+    )
   }
 }
 

@@ -15,10 +15,8 @@ import com.example.muxer.MediaMuxerManager
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
-import com.example.settings.ColorStandardOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.InternalRecordingConfig
-import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
 import com.example.settings.VideoFpsOption
 import java.util.concurrent.CountDownLatch
@@ -42,9 +40,9 @@ data class EncoderSelection(
 
 /**
  * Hardware-first H.265/HEVC (video/hevc) MediaCodec encoder using native hardware
- * COLOR_FormatSurface input (YUV_420_888 for 8-bit, P010 for 10-bit), supporting Asynchronous
- * Callback or Direct Synchronous draining, VBR/CQ bitrate modes, 8-bit/10-bit HEVC profiles,
- * BT.709 SDR / BT.2020 HLG HDR color metadata, Limited/Full range, and 1s/0.5s GOP intervals.
+ * COLOR_FormatSurface input (YUV_420_888 for 8-bit, P010 for 10-bit), fixed Asynchronous
+ * Rendering (Direct Surface + Async Callback), fixed BT.709 (SDR) color standard, VBR/CQ
+ * bitrate modes, 8-bit/10-bit HEVC profiles, Limited/Full range, and 1s/0.5s GOP intervals.
  */
 class VideoEncoder(
   private val requestedWidth: Int,
@@ -54,14 +52,11 @@ class VideoEncoder(
   private val fpsOption: VideoFpsOption = VideoFpsOption.FPS_30,
   private val bitrateMode: BitrateModeOption = BitrateModeOption.VBR,
   private val colorDepth: ColorDepthOption = ColorDepthOption.BIT_8,
-  private val colorStandard: ColorStandardOption = ColorStandardOption.BT_709,
   private val colorRange: ColorRangeOption = ColorRangeOption.LIMITED,
   private val gopInterval: GopIntervalOption = GopIntervalOption.SEC_1,
-  private val renderingMode: RenderingModeOption = RenderingModeOption.ASYNC_SURFACE,
 ) {
   private var mediaCodec: MediaCodec? = null
   private var inputSurface: Surface? = null
-  private var drainThread: Thread? = null
   private var callbackThread: HandlerThread? = null
   private val asyncEosLatch = CountDownLatch(1)
   private val isRunning = AtomicBoolean(false)
@@ -87,12 +82,10 @@ class VideoEncoder(
           MediaCodec.createEncoderByType(InternalRecordingConfig.VIDEO_MIME_TYPE)
         }
 
-    if (renderingMode == RenderingModeOption.ASYNC_SURFACE) {
-      val cbThread = HandlerThread("FrameCut-VideoAsync").apply { start() }
-      callbackThread = cbThread
-      val cbHandler = Handler(cbThread.looper)
-      codec.setCallback(createAsyncCallback(), cbHandler)
-    }
+    val cbThread = HandlerThread("FrameCut-VideoAsync").apply { start() }
+    callbackThread = cbThread
+    val cbHandler = Handler(cbThread.looper)
+    codec.setCallback(createAsyncCallback(), cbHandler)
 
     selected = configureHevcWithFallback(codec, selected)
     selection = selected
@@ -102,18 +95,10 @@ class VideoEncoder(
     mediaCodec = codec
     isRunning.set(true)
 
-    if (renderingMode == RenderingModeOption.DIRECT_SURFACE) {
-      drainThread =
-        Thread(::drainLoop, "FrameCut-VideoDrain").apply {
-          priority = Thread.MAX_PRIORITY
-          start()
-        }
-    }
-
     Log.i(
       TAG,
       "VideoEncoder started: codec=${selected.codecName} (H.265/HEVC), " +
-        "mode=${renderingMode.label}, depth=${colorDepth.label}, std=${colorStandard.label}, " +
+        "mode=AsyncSurface, depth=${colorDepth.label}, std=BT.709(SDR), " +
         "range=${colorRange.label}, bitrateMode=${bitrateMode.label}, gop=${gopInterval.label}, " +
         "fps=${fpsOption.fps}, hw=${selected.isHardwareAccelerated}, chipset=${selected.chipsetFamily}, " +
         "size=${selected.alignedWidth}x${selected.alignedHeight}, bitrate=${selected.effectiveBitrateBps / 1_000_000}Mbps",
@@ -127,13 +112,12 @@ class VideoEncoder(
   ): EncoderSelection {
     var selected = initialSelection
 
-    // Primary format built strictly from user selections
+    // Primary format built strictly from user selections + fixed BT.709 (SDR)
     val primaryFormat =
       buildHevcFormat(
         codecInfo = codec.codecInfo,
         selected = selected,
         use10Bit = colorDepth == ColorDepthOption.BIT_10,
-        useBt2020 = colorStandard == ColorStandardOption.BT_2020,
         requestedRange = colorRange.mediaFormatRange,
         requestedGop = gopInterval,
         requestedBitrateMode = bitrateMode,
@@ -145,13 +129,12 @@ class VideoEncoder(
       Log.w(TAG, "Primary HEVC format rejected; trying compatible hardware fallback", e)
     }
 
-    // Fallback 1: Keep depth & standard, clamp range to LIMITED and GOP to 1s integer
+    // Fallback 1: Keep depth, clamp range to LIMITED and GOP to 1s integer
     val rangeFallbackFormat =
       buildHevcFormat(
         codecInfo = codec.codecInfo,
         selected = selected,
         use10Bit = colorDepth == ColorDepthOption.BIT_10,
-        useBt2020 = colorStandard == ColorStandardOption.BT_2020,
         requestedRange = MediaFormat.COLOR_RANGE_LIMITED,
         requestedGop = GopIntervalOption.SEC_1,
         requestedBitrateMode = BitrateModeOption.VBR,
@@ -160,7 +143,7 @@ class VideoEncoder(
       codec.configure(rangeFallbackFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
       return selected
     } catch (e: Exception) {
-      Log.w(TAG, "10-bit/BT.2020 or secondary HEVC config rejected; falling back to 8-bit BT.709 Main", e)
+      Log.w(TAG, "10-bit or secondary HEVC config rejected; falling back to 8-bit BT.709 Main", e)
     }
 
     // Fallback 2: Safe 8-bit BT.709 SDR HEVCProfileMain baseline
@@ -169,7 +152,6 @@ class VideoEncoder(
         codecInfo = codec.codecInfo,
         selected = selected,
         use10Bit = false,
-        useBt2020 = false,
         requestedRange = MediaFormat.COLOR_RANGE_LIMITED,
         requestedGop = GopIntervalOption.SEC_1,
         requestedBitrateMode = BitrateModeOption.VBR,
@@ -204,7 +186,6 @@ class VideoEncoder(
     codecInfo: MediaCodecInfo,
     selected: EncoderSelection,
     use10Bit: Boolean,
-    useBt2020: Boolean,
     requestedRange: Int,
     requestedGop: GopIntervalOption,
     requestedBitrateMode: BitrateModeOption,
@@ -228,13 +209,8 @@ class VideoEncoder(
           )
         }
 
-        if (useBt2020) {
-          setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020)
-          setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_HLG)
-        } else {
-          setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
-          setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
-        }
+        setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+        setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
         setInteger(MediaFormat.KEY_COLOR_RANGE, requestedRange)
 
         configureBitrateModeAndHevcProfile(
@@ -335,63 +311,8 @@ class VideoEncoder(
     } catch (e: Exception) {
       Log.w(TAG, "signalEndOfInputStream failed", e)
     }
-    if (renderingMode == RenderingModeOption.ASYNC_SURFACE) {
-      runCatching { asyncEosLatch.await(2500L, TimeUnit.MILLISECONDS) }
-    } else {
-      try {
-        drainThread?.join(2500L)
-      } catch (_: InterruptedException) {
-        Thread.currentThread().interrupt()
-      }
-    }
+    runCatching { asyncEosLatch.await(2500L, TimeUnit.MILLISECONDS) }
     releaseResources()
-  }
-
-  private fun drainLoop() {
-    val codec = mediaCodec ?: return
-    val bufferInfo = MediaCodec.BufferInfo()
-    var formatAdded = false
-
-    while (true) {
-      val timeoutUs = if (isRunning.get()) 10_000L else 5_000L
-      val index =
-        try {
-          codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
-        } catch (e: Exception) {
-          Log.e(TAG, "dequeueOutputBuffer error", e)
-          break
-        }
-
-      when {
-        index == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-          if (!isRunning.get()) {
-            break
-          }
-        }
-        index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-          if (!formatAdded) {
-            muxerManager.addVideoTrack(codec.outputFormat)
-            formatAdded = true
-          }
-        }
-        index >= 0 -> {
-          val encodedData = codec.getOutputBuffer(index)
-          if (
-            encodedData != null &&
-              bufferInfo.size > 0 &&
-              (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
-          ) {
-            if (muxerManager.isStarted() || muxerManager.awaitStarted(2500L)) {
-              muxerManager.writeVideoSample(encodedData, bufferInfo)
-            }
-          }
-          codec.releaseOutputBuffer(index, false)
-          if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-            break
-          }
-        }
-      }
-    }
   }
 
   private fun releaseResources() {
@@ -403,7 +324,6 @@ class VideoEncoder(
     callbackThread?.quitSafely()
     runCatching { callbackThread?.join(1000) }
     callbackThread = null
-    drainThread = null
   }
 
   private fun configureBitrateModeAndHevcProfile(

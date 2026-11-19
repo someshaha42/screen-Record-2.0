@@ -6,6 +6,7 @@ import android.media.MediaFormat
 import androidx.compose.runtime.Immutable
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -60,16 +61,6 @@ enum class VideoFpsOption(val fps: Int, val label: String) {
   FPS_60(60, "60 FPS"),
 }
 
-enum class ColorStandardOption(val label: String) {
-  BT_709("BT.709 (SDR)"),
-  BT_2020("BT.2020 (HDR)"),
-}
-
-enum class RenderingModeOption(val label: String) {
-  ASYNC_SURFACE("Asynchronous Rendering"),
-  DIRECT_SURFACE("Direct Rendering"),
-}
-
 enum class GopIntervalOption(val secondsFloat: Float, val label: String) {
   SEC_1(1.0f, "1 Second"),
   SEC_0_5(0.5f, "0.5 Second"),
@@ -118,11 +109,10 @@ data class RecordingSettings(
   val bitrateMode: BitrateModeOption = BitrateModeOption.VBR,
   val colorDepth: ColorDepthOption = ColorDepthOption.BIT_8,
   val videoFps: VideoFpsOption = VideoFpsOption.FPS_30,
-  val colorStandard: ColorStandardOption = ColorStandardOption.BT_709,
-  val renderingMode: RenderingModeOption = RenderingModeOption.ASYNC_SURFACE,
   val gopInterval: GopIntervalOption = GopIntervalOption.SEC_1,
   val colorRange: ColorRangeOption = ColorRangeOption.LIMITED,
   val audioFormat: AudioFormatOption = AudioFormatOption.MONO_AAC,
+  val darkThemeOverride: Boolean? = null,
 )
 
 /**
@@ -148,6 +138,8 @@ object InternalRecordingConfig {
 
   const val CHROMA_SUBSAMPLING_LABEL = "4:2:0"
   const val OUTPUT_CONTAINER_LABEL = "Standard MP4"
+  const val COLOR_STANDARD_LABEL = "BT.709 (SDR)"
+  const val RENDERING_MODE_LABEL = "Asynchronous Rendering (Direct Surface + Async Callback)"
 }
 
 class RecordingSettingsRepository(private val context: Context) {
@@ -166,11 +158,10 @@ class RecordingSettingsRepository(private val context: Context) {
     val BITRATE_MODE = stringPreferencesKey("bitrate_mode")
     val COLOR_DEPTH = stringPreferencesKey("color_depth")
     val VIDEO_FPS = stringPreferencesKey("video_fps")
-    val COLOR_STANDARD = stringPreferencesKey("color_standard")
-    val RENDERING_MODE = stringPreferencesKey("rendering_mode")
     val GOP_INTERVAL = stringPreferencesKey("gop_interval")
     val COLOR_RANGE = stringPreferencesKey("color_range")
     val AUDIO_FORMAT = stringPreferencesKey("audio_format")
+    val DARK_THEME = booleanPreferencesKey("dark_theme")
   }
 
   val settingsFlow: Flow<RecordingSettings> =
@@ -199,16 +190,13 @@ class RecordingSettingsRepository(private val context: Context) {
           enumValueOrDefault(prefs[Keys.COLOR_DEPTH], ColorDepthOption.BIT_8),
         videoFps =
           enumValueOrDefault(prefs[Keys.VIDEO_FPS], VideoFpsOption.FPS_30),
-        colorStandard =
-          enumValueOrDefault(prefs[Keys.COLOR_STANDARD], ColorStandardOption.BT_709),
-        renderingMode =
-          enumValueOrDefault(prefs[Keys.RENDERING_MODE], RenderingModeOption.ASYNC_SURFACE),
         gopInterval =
           enumValueOrDefault(prefs[Keys.GOP_INTERVAL], GopIntervalOption.SEC_1),
         colorRange =
           enumValueOrDefault(prefs[Keys.COLOR_RANGE], ColorRangeOption.LIMITED),
         audioFormat =
           enumValueOrDefault(prefs[Keys.AUDIO_FORMAT], AudioFormatOption.MONO_AAC),
+        darkThemeOverride = prefs[Keys.DARK_THEME],
       )
     }
 
@@ -244,14 +232,6 @@ class RecordingSettingsRepository(private val context: Context) {
     context.settingsDataStore.edit { it[Keys.VIDEO_FPS] = fps.name }
   }
 
-  suspend fun setColorStandard(standard: ColorStandardOption) {
-    context.settingsDataStore.edit { it[Keys.COLOR_STANDARD] = standard.name }
-  }
-
-  suspend fun setRenderingMode(mode: RenderingModeOption) {
-    context.settingsDataStore.edit { it[Keys.RENDERING_MODE] = mode.name }
-  }
-
   suspend fun setGopInterval(interval: GopIntervalOption) {
     context.settingsDataStore.edit { it[Keys.GOP_INTERVAL] = interval.name }
   }
@@ -262,6 +242,10 @@ class RecordingSettingsRepository(private val context: Context) {
 
   suspend fun setAudioFormat(format: AudioFormatOption) {
     context.settingsDataStore.edit { it[Keys.AUDIO_FORMAT] = format.name }
+  }
+
+  suspend fun setDarkTheme(dark: Boolean) {
+    context.settingsDataStore.edit { it[Keys.DARK_THEME] = dark }
   }
 
   suspend fun saveSelectedRegion(region: NormalizedRegion) {

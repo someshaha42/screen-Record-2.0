@@ -21,7 +21,6 @@ import com.example.settings.AudioSourceOption
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
-import com.example.settings.ColorStandardOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
@@ -29,7 +28,6 @@ import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RecordingSettingsRepository
 import com.example.settings.RegionAnimationOption
-import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
 import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -187,22 +185,6 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     viewModelScope.launch { settingsRepo.setVideoFps(fps) }
   }
 
-  @Volatile private var latestColorStandardOverride: ColorStandardOption? = null
-
-  fun setColorStandard(standard: ColorStandardOption) {
-    if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestColorStandardOverride = standard
-    viewModelScope.launch { settingsRepo.setColorStandard(standard) }
-  }
-
-  @Volatile private var latestRenderingModeOverride: RenderingModeOption? = null
-
-  fun setRenderingMode(mode: RenderingModeOption) {
-    if (uiState.value.session.phase != RecordingPhase.IDLE) return
-    latestRenderingModeOverride = mode
-    viewModelScope.launch { settingsRepo.setRenderingMode(mode) }
-  }
-
   @Volatile private var latestGopIntervalOverride: GopIntervalOption? = null
 
   fun setGopInterval(interval: GopIntervalOption) {
@@ -225,6 +207,10 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
     if (uiState.value.session.phase != RecordingPhase.IDLE) return
     latestAudioFormatOverride = format
     viewModelScope.launch { settingsRepo.setAudioFormat(format) }
+  }
+
+  fun setDarkTheme(dark: Boolean) {
+    viewModelScope.launch { settingsRepo.setDarkTheme(dark) }
   }
 
   @Volatile private var latestRegionAnimationOverride: RegionAnimationOption? = null
@@ -269,8 +255,6 @@ class RecorderViewModel(application: Application) : AndroidViewModel(application
         bitrateMode = latestBitrateModeOverride ?: baseSettings.bitrateMode,
         colorDepth = latestColorDepthOverride ?: baseSettings.colorDepth,
         videoFps = latestVideoFpsOverride ?: baseSettings.videoFps,
-        colorStandard = latestColorStandardOverride ?: baseSettings.colorStandard,
-        renderingMode = latestRenderingModeOverride ?: baseSettings.renderingMode,
         gopInterval = latestGopIntervalOverride ?: baseSettings.gopInterval,
         colorRange = latestColorRangeOverride ?: baseSettings.colorRange,
         audioFormat = latestAudioFormatOverride ?: baseSettings.audioFormat,

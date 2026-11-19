@@ -35,14 +35,12 @@ import com.example.settings.AudioSourceOption
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
-import com.example.settings.ColorStandardOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.NormalizedRegion
 import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
-import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
 import com.example.settings.VideoFpsOption
 import kotlinx.coroutines.CoroutineScope
@@ -235,20 +233,6 @@ class RecordingService : Service() {
           )
         }
         .getOrDefault(VideoFpsOption.FPS_30)
-    val colorStandard =
-      runCatching {
-          ColorStandardOption.valueOf(
-            intent.getStringExtra(EXTRA_COLOR_STANDARD) ?: ColorStandardOption.BT_709.name,
-          )
-        }
-        .getOrDefault(ColorStandardOption.BT_709)
-    val renderingMode =
-      runCatching {
-          RenderingModeOption.valueOf(
-            intent.getStringExtra(EXTRA_RENDERING_MODE) ?: RenderingModeOption.ASYNC_SURFACE.name,
-          )
-        }
-        .getOrDefault(RenderingModeOption.ASYNC_SURFACE)
     val gopInterval =
       runCatching {
           GopIntervalOption.valueOf(
@@ -298,8 +282,6 @@ class RecordingService : Service() {
         bitrateMode = bitrateMode,
         colorDepth = colorDepth,
         videoFps = videoFps,
-        colorStandard = colorStandard,
-        renderingMode = renderingMode,
         gopInterval = gopInterval,
         colorRange = colorRange,
         audioFormat = audioFormat,
@@ -388,10 +370,8 @@ class RecordingService : Service() {
           fpsOption = settings.videoFps,
           bitrateMode = settings.bitrateMode,
           colorDepth = settings.colorDepth,
-          colorStandard = settings.colorStandard,
           colorRange = settings.colorRange,
           gopInterval = settings.gopInterval,
-          renderingMode = settings.renderingMode,
         )
       val selection: EncoderSelection = encoder.prepare()
       videoEncoder = encoder
@@ -718,8 +698,6 @@ class RecordingService : Service() {
     const val EXTRA_BITRATE_MODE = "extra_bitrate_mode"
     const val EXTRA_COLOR_DEPTH = "extra_color_depth"
     const val EXTRA_VIDEO_FPS = "extra_video_fps"
-    const val EXTRA_COLOR_STANDARD = "extra_color_standard"
-    const val EXTRA_RENDERING_MODE = "extra_rendering_mode"
     const val EXTRA_GOP_INTERVAL = "extra_gop_interval"
     const val EXTRA_COLOR_RANGE = "extra_color_range"
     const val EXTRA_AUDIO_FORMAT = "extra_audio_format"
@@ -746,8 +724,6 @@ class RecordingService : Service() {
         putExtra(EXTRA_BITRATE_MODE, settings.bitrateMode.name)
         putExtra(EXTRA_COLOR_DEPTH, settings.colorDepth.name)
         putExtra(EXTRA_VIDEO_FPS, settings.videoFps.name)
-        putExtra(EXTRA_COLOR_STANDARD, settings.colorStandard.name)
-        putExtra(EXTRA_RENDERING_MODE, settings.renderingMode.name)
         putExtra(EXTRA_GOP_INTERVAL, settings.gopInterval.name)
         putExtra(EXTRA_COLOR_RANGE, settings.colorRange.name)
         putExtra(EXTRA_AUDIO_FORMAT, settings.audioFormat.name)

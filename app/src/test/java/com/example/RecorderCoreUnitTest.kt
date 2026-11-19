@@ -9,7 +9,6 @@ import com.example.settings.AudioSourceOption
 import com.example.settings.BitrateModeOption
 import com.example.settings.ColorDepthOption
 import com.example.settings.ColorRangeOption
-import com.example.settings.ColorStandardOption
 import com.example.settings.GopIntervalOption
 import com.example.settings.InternalRecordingConfig
 import com.example.settings.NormalizedRegion
@@ -17,10 +16,10 @@ import com.example.settings.OrientationMode
 import com.example.settings.RecordingMode
 import com.example.settings.RecordingSettings
 import com.example.settings.RegionAnimationOption
-import com.example.settings.RenderingModeOption
 import com.example.settings.VideoBitrateOption
 import com.example.settings.VideoFpsOption
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,6 +37,12 @@ class RecorderCoreUnitTest {
     assertEquals(1, InternalRecordingConfig.AUDIO_CHANNEL_COUNT)
     assertEquals("4:2:0", InternalRecordingConfig.CHROMA_SUBSAMPLING_LABEL)
     assertEquals("Standard MP4", InternalRecordingConfig.OUTPUT_CONTAINER_LABEL)
+    assertEquals("BT.709 (SDR)", InternalRecordingConfig.COLOR_STANDARD_LABEL)
+    assertEquals(
+      "Asynchronous Rendering (Direct Surface + Async Callback)",
+      InternalRecordingConfig.RENDERING_MODE_LABEL,
+    )
+    assertNull(defaults.darkThemeOverride)
 
     assertEquals(AudioSourceOption.INTERNAL, defaults.audioSource)
     assertEquals(VideoBitrateOption.MBPS_150, defaults.videoBitrate)
@@ -52,18 +57,6 @@ class RecorderCoreUnitTest {
 
     assertEquals(VideoFpsOption.FPS_30, defaults.videoFps)
     assertEquals(listOf(30, 60), VideoFpsOption.entries.map { it.fps })
-
-    assertEquals(ColorStandardOption.BT_709, defaults.colorStandard)
-    assertEquals(
-      listOf(ColorStandardOption.BT_709, ColorStandardOption.BT_2020),
-      ColorStandardOption.entries,
-    )
-
-    assertEquals(RenderingModeOption.ASYNC_SURFACE, defaults.renderingMode)
-    assertEquals(
-      listOf(RenderingModeOption.ASYNC_SURFACE, RenderingModeOption.DIRECT_SURFACE),
-      RenderingModeOption.entries,
-    )
 
     assertEquals(GopIntervalOption.SEC_1, defaults.gopInterval)
     assertEquals(listOf(1.0f, 0.5f), GopIntervalOption.entries.map { it.secondsFloat })

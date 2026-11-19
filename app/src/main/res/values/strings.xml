@@ -85,11 +85,9 @@
     <string name="fps_60_desc">Fluid motion capture</string>
 
     <string name="section_color_standard">Color Standard</string>
-    <string name="section_color_standard_hint">Defines display color gamut mapping</string>
+    <string name="section_color_standard_hint">Fixed hardware display color gamut</string>
     <string name="color_std_bt709">BT.709 (SDR)</string>
-    <string name="color_std_bt709_desc">Accurate standard screens</string>
-    <string name="color_std_bt2020">BT.2020 (HDR)</string>
-    <string name="color_std_bt2020_desc">Wide gamut HLG HDR</string>
+    <string name="color_std_bt709_desc">Fixed accurate SDR color</string>
 
     <string name="section_container_muxer">Output Container</string>
     <string name="section_container_muxer_hint">Active MP4 muxing container format</string>
@@ -97,11 +95,9 @@
     <string name="muxer_standard_mp4_desc">Native Android MediaMuxer</string>
 
     <string name="section_rendering_mode">Rendering Pipeline</string>
-    <string name="section_rendering_mode_hint">Selects zero-copy surface callback mode</string>
-    <string name="rendering_async">Async Surface</string>
-    <string name="rendering_async_desc">Fast non-blocking callback</string>
-    <string name="rendering_direct">Direct Surface</string>
-    <string name="rendering_direct_desc">Synchronous zero-copy loop</string>
+    <string name="section_rendering_mode_hint">Fixed zero-copy surface callback pipeline</string>
+    <string name="rendering_async">Asynchronous Rendering</string>
+    <string name="rendering_async_desc">Direct Surface + Async Callback</string>
 
     <string name="section_gop_interval">Keyframe Interval (GOP)</string>
     <string name="section_gop_interval_hint">Controls seeking &amp; edit precision</string>
@@ -147,6 +143,8 @@
     <string name="cd_resume_button">Resume screen recording</string>
     <string name="cd_recordings_button">Open recorded videos</string>
     <string name="cd_settings_button">Open encoding settings</string>
+    <string name="cd_theme_switch_to_light">Switch to light theme</string>
+    <string name="cd_theme_switch_to_dark">Switch to dark theme</string>
     <string name="cd_back_button">Navigate back</string>
     <string name="cd_region_preview">Selected screen recording region preview</string>
 </resources>
